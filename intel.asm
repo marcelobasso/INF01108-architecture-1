@@ -20,29 +20,36 @@
 		
 		
 		; buffers
-		CMDLINE			DB 	240 DUP (?) 	; usado na funcao GetCMDLine
-		BufferWRWORD	DB  80 	DUP (?)		; usado na funcao WriteWord
+		CMDLINE			DB 	240 DUP (0) 	; usado na funcao GetCMDLine
+		BufferWRWORD	DB  80 	DUP (0)		; usado na funcao WriteWord
 	
 		; variables
 		cmdline_size	DW	0
-		file_in			DB	80	DUP (?)		; string: arquivo de entrada
-		file_out		DB	80 	DUP (?)		; string: arquivo de saida
+		file_in			DB	80	DUP (0)		; string: arquivo de entrada
+		file_out		DB	80 	DUP (0)		; string: arquivo de saida
 		tension			DB  0 				; int: valor de tensao
 		
 	.code
 	.startup
 		call	GetCMDLine					; le linha do CMD	
 		mov		cmdline_size, ax
+		; lea	bx, CMDLINE
+		; call 	WriteString					; escreve a linha lida na tela (debugging)
+		
 		lea		bx, CMDLINE
-		call 	WriteString					; escreve a linha lida na tela (debugging)
+		lea		bp, file_in
+		call 	Strcpy
+		lea		bx, file_in
+		call	WriteString
 		
 		; validar flags
-		;mov		ah, FLAG_I
-		;mov		al, DEFAULT_IN
-		;mov		cl, file_in
+		;lea		ah, FLAG_I
+		;lea		al, DEFAULT_IN
+		;lea		cl, file_in
 		;call 		FindFlag
 		;mov		ah, 4CH
 		;pop		bx
+		;mov		bh, 0
 		;mov		al, bl
 		;int		21H
 		
@@ -129,23 +136,23 @@
 
 ; FindFlag 	endp
 
-; ;--------------------------------------------------------------------
-; ; GetNextChar: dl <- [++bx]
-; ; Entra: bx: ponteiro para string a ser percorrida
-; ; Retorna: dl: char lido
-; ;--------------------------------------------------------------------
+;--------------------------------------------------------------------
+; GetNextChar: dl <- [++bx]
+; Entra: bx: ponteiro para string a ser percorrida
+; Retorna: dl: char lido
+;--------------------------------------------------------------------
 GetNextChar	proc	near
 	inc		bx
-	mov		dl,	[bx]
+	mov		dl,	byte [bx]
 	ret
 GetNextChar	endp
 
-; ;--------------------------------------------------------------------
-; ; Strcpy: dados dois ponteiros de string, copia uma para a outra
-; ;		  até encontrar um espaço
-; ; Entra: bx: string origem
-; ;		   bp: string destino
-; ;--------------------------------------------------------------------
+;--------------------------------------------------------------------
+; Strcpy: dados dois ponteiros de string, copia uma para a outra
+;		  até encontrar um espaço, ignorando espaços iniciais.
+; Entrada: bx: string origem
+;		   bp: string destino
+;--------------------------------------------------------------------
 Strcpy		proc 	near
 	CP_repeat:
 		mov 	al, [bx]    	; Load character from source string
@@ -156,13 +163,14 @@ Strcpy		proc 	near
 
 	CP_1:
 		; copia ate encontra espaco, final da string, cr ou lf
-		cmp		[bx], 0
+		mov		al, [bx]
+		cmp		al, 0
 		jz		CP_end
-		cmp		[bx], SPACE
+		cmp		al, SPACE
 		jz		CP_end
-		cmp		[bx], CR
+		cmp		al, CR
 		jz		CP_end
-		cmp		[bx], LF
+		cmp		al, LF
 		jz		CP_end
 
 	CP_2:		
@@ -194,8 +202,8 @@ WriteWord	endp
 
 
 ;--------------------------------------------------------------------
-;Função: Escrever um string na tela
-;Entra: DS:BX -> Ponteiro para o string
+; Função: Escrever um string na tela
+; Entra: DS:BX -> Ponteiro para o string
 ;--------------------------------------------------------------------
 WriteString	proc	near
 
