@@ -10,18 +10,21 @@
 		HYPHEN	equ		'-'
 		FLAG_I			equ 	'i'			
 		DEFAULT_IN		equ		'a.in'
+		I_ERROR			DB		'Opcao [-i] sem parametro', LF, 0
 		FLAG_O			equ 	'o'			
 		DEFAULT_OUT		equ		'a.out'
+		O_ERROR			DB		'Opcao [-o] sem parametro', LF, 0
 		FLAG_V			equ 	'v'			; 127 ou 220
 		DEFAULT_TENSION	equ		127
-		FLAG_ERROR		DB		'Opcao [] sem parametro', LF, 0
+		V_ERROR			DB		'Opcao [-v] sem parametro', LF, 0
+		
 		
 		; buffers
 		CMDLINE			DB 	240 DUP (?) 	; usado na funcao GetCMDLine
 		BufferWRWORD	DB  80 	DUP (?)		; usado na funcao WriteWord
 	
 		; variables
-		CMDLINE_SIZE	DB	0
+		cmdline_size	DW	0
 		file_in			DB	80	DUP (?)		; string: arquivo de entrada
 		file_out		DB	80 	DUP (?)		; string: arquivo de saida
 		tension			DB  0 				; int: valor de tensao
@@ -29,12 +32,19 @@
 	.code
 	.startup
 		call	GetCMDLine					; le linha do CMD	
-		mov		CMDLINE_SIZE, ax
+		mov		cmdline_size, ax
 		lea		bx, CMDLINE
 		call 	WriteString					; escreve a linha lida na tela (debugging)
 		
 		; validar flags
-		call 	InspectFlags
+		;mov		ah, FLAG_I
+		;mov		al, DEFAULT_IN
+		;mov		cl, file_in
+		;call 		FindFlag
+		;mov		ah, 4CH
+		;pop		bx
+		;mov		al, bl
+		;int		21H
 		
 	.exit
 
@@ -43,77 +53,132 @@
 ;--------------------------------------------------------------------
 
 ;--------------------------------------------------------------------
-; InspectFlags: valida as flags e salva seus valores nas variaveis
-;				adequadas. Caso nao houver, salva valor padrao.
+; FindFlag: procura uma flag no buffer CMDLINE e seta seu valor ou exibe mensagem.
+; entra: ah: flag a ser encontrada
+;		 al: valor padrao caso nao encontrar
+;		 bx: Usada internamente como ponteiro para CMDLINE
+;		 cl: ponteiro para variavel a ser settada
+; retorna:
+;		 empilha 1 caso deu erro (flag sem parametro), 0 caso achou a flag ou setou padrao
 ;--------------------------------------------------------------------
-InspectFlags	proc	near
-; 1 - encontra espaco
-; 2 - espaco seguido de hyphen
-; 3 - hyphen seguido de alguma flag
-; 4 - seta valor da flag/informa erro na tela
-; erros: sem parametros; tensao diferentes de 127 ou 220
+; FindFlag	proc	near
+		; mov		bx, CMDLINE
+	
+	; FF_1:
+		; mov		dl, byte [bx]		; While (*S!='\0') {
+		; cmp		dl, 0
+		; jnz		FF_2
+		; ; nao encontrou a flag (setta padrao apontado por al)
+		; push	0
+		; cmp		byte [ah], FLAG_V
+		; jnz		FF_string
+		; mov		cl, byte DEFAULT_TENSION
+		; ret
 		
-		lea		bx, CMDLINE
+	; FF_string:
+		; mov		ah, al
+		; mov		al, cl
+		; call	Strcpy
+		; ret
 		
-IF_2:		
-		mov		dl, [bx]
-		cmp		dl, 0
-		jnz		WS_1
+	; FF_2:
+		; cmp		dl, SPACE		; procura a sequencia " -FLAG " onde flag pode ser i, o ou v
+		; jnz		FF_3
+		
+		; call 	GetNextChar
+		; cmp		dl, HYPHEN
+		; jnz		FF_3
+		
+		; call	GetNextChar
+		; cmp		dl, byte [ah]
+		; jnz		FF_3
+		
+		; call	GetNextChar
+		; cmp		dl, SPACE
+		; jnz		FF_3
+		
+		; ; --- encontrou a flag desejada ---
+		
+		; ; flag sem parametro (erro 1)
+		; call	GetNextChar
+		; cmp		dl, HYPHEN
+		; jz		FF_error
+		; cmp		dl, 0
+		; jz		FF_error
+		; jmp		FF_found
+		
+	; FF_error:
+		; ; escreve mensagem de erro 'Opcao [- ] sem parametro',
+		; mov		bx,	cx
+		; call	WriteString
+		; push 	1
+		; ret
+		
+		
+	; FF_found:
+		; ; setta valor na variavel (sem erro)
+		; mov		ah, bx
+		; mov		al,	cl
+		; call	Strcpy
+		; push 	0
+		; ret
+		
+	; FF_3:	
+		; inc		bx
+		; jmp		FF_1
+
+; FindFlag 	endp
+
+; ;--------------------------------------------------------------------
+; ; GetNextChar: dl <- [++bx]
+; ; Entra: bx: ponteiro para string a ser percorrida
+; ; Retorna: dl: char lido
+; ;--------------------------------------------------------------------
+GetNextChar	proc	near
+	inc		bx
+	mov		dl,	[bx]
+	ret
+GetNextChar	endp
+
+; ;--------------------------------------------------------------------
+; ; Strcpy: dados dois ponteiros de string, copia uma para a outra
+; ;		  até encontrar um espaço
+; ; Entra: bx: string origem
+; ;		   bp: string destino
+; ;--------------------------------------------------------------------
+Strcpy		proc 	near
+	CP_repeat:
+		mov 	al, [bx]    	; Load character from source string
+		cmp 	al, SPACE      	; Compare with space character
+		jne 	CP_1			; If not a space, exit loop
+		inc 	bx           	; Move to the next character
+		jmp 	CP_repeat       ; Repeat until non-space character is found
+
+	CP_1:
+		; copia ate encontra espaco, final da string, cr ou lf
+		cmp		[bx], 0
+		jz		CP_end
+		cmp		[bx], SPACE
+		jz		CP_end
+		cmp		[bx], CR
+		jz		CP_end
+		cmp		[bx], LF
+		jz		CP_end
+
+	CP_2:		
+		mov		ax, [bx]
+		mov		[bp], ax
+		inc		bp
+		inc		bx
+		jmp		CP_1
+		
+	CP_end:
+		inc		bp
+		mov		byte [bp], 0
 		ret
 
-IF_1:
-		cmp		dl, SPACE
-		jnz		IF_continue
-		
-		; caso achou espaço
-		inc 	bx
-		mov		dl, [bx]
-		cmp		dl, 0
-		je		IF_2
-		cmp		dl, HYPHEN
-		jnz		IF_continue
-		
-		; achou hífen
-		inc 	bx
-		mov		dl, [bx]
-		cmp		dl, 0
-		je		IF_2
-IF_I:
-		cmp		dl, FLAG_I
-		jne		IF_O
-		inc		bx
-		mov		dl, [bx]
-		cmp		dl, SPACE
-		jne		IF_invalid
-		
-IF_O:
-		cmp		dl, FLAG_O
-		jne		IF_V
-		inc		bx
-		mov		dl, [bx]
-		cmp		dl, SPACE
-		jne		IF_invalid
-		
-IF_V:	
-		cmp 	dl, FLAG_V
-		jne		IF_invalid
-		inc		bx
-		mov		dl, [bx]
-		cmp		dl, SPACE
-		jne		IF_invalid
-		
-IF_invalid:
-		mov		ax, 1
-		ret
-		
-IF_continue:
-		inc 	bx
-		jmp		IF_2
+Strcpy		endp
 
-InspectFlags	endp
-
-
-;
 ;--------------------------------------------------------------------
 ;Função: Escreve o valor de AX na tela
 ;--------------------------------------------------------------------
