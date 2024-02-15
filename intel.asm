@@ -4,33 +4,39 @@
 
 	.data
 		; constantes e strings
-		CR			equ		13					; Carriage Return (Enter)
-		LF			equ		10  				; Line Feed ('\n')
-		SPACE		equ		' '
-		HYPHEN		equ		'-'
-		DEFAULT_TENSION	equ		127
-		FLAG_I			DB 		'i'			
-		DEFAULT_IN		DB		'a.in', 0
-		I_ERROR			DB		'Opcao [-i] sem parametro', LF, 0
-		FLAG_O			DB 		'o'			
-		DEFAULT_OUT		DB		'a.out', 0
-		O_ERROR			DB		'Opcao [-o] sem parametro', LF, 0
+		CR				equ		13					; Carriage Return (Enter)
+		LF				equ		10  				; Line Feed ('\n')
+		SPACE			equ		' '
+		HYPHEN			equ		'-'
+		FLAG_I			DB 		'i'
+		FLAG_O			DB 		'o'
 		FLAG_V			DB 		'v'
-		DEFAULT_TENSION_STR		DB 	'127', 0
+		
+		I_INFO			DB 		'-i: ', 0
+		O_INFO			DB 		'-o: ', 0
+		V_INFO			DB 		'-v: ', 0
+		
+		DEFAULT_IN		DB		'a.in', 0
+		DEFAULT_OUT		DB		'a.out', 0
+		DEFAULT_TENSION	DB 		'127', 0
+		
+		I_ERROR			DB		'Opcao [-i] sem parametro', LF, 0			
+		O_ERROR			DB		'Opcao [-o] sem parametro', LF, 0
 		V_ERROR			DB		'Opcao [-v] sem parametro', LF, 0
 		V_ERROR_2		DB		'Parametro da opcao [-v] deve ser 127 ou 220', LF, 0
 		
 		; buffers
-		CMDLINE			DB 	240 DUP (?) 	; usado na funcao GetCMDLine
-		BufferWRWORD	DB  80 	DUP (?)		; usado na funcao WriteWord
+		CMDLINE			DB 		240 DUP (?) 	; usado na funcao GetCMDLine
+		BufferWRWORD	DB  	80 	DUP (?)		; usado na funcao WriteWord
 	
 		; variables
-		cmdline_size	DW	0
-		file_in			DB	80	DUP (?)		; string: arquivo de entrada
-		file_out		DB	80 	DUP (?)		; string: arquivo de saida
-		tension_str		DB  80	DUP (?) 	; string: valor de tensao
-		tension_int		DB 	0				; int: tensao convertida
-		flag_error		DB 	0				; int: indica se há erro nas flags
+		cmdline_size	DW		0
+		file_in			DB		80	DUP (?)		; string: arquivo de entrada
+		file_out		DB		80 	DUP (?)		; string: arquivo de saida
+		tension_str		DB  	80	DUP (?) 	; string: valor de tensao
+		tension_int		DB 		0				; int: tensao convertida
+		flag_error		DB 		0				; int: indica se há erro nas flags
+		tension_error	DB		0				; int: indica se tensão é válida
 		
 	.code
 	.startup
@@ -38,18 +44,14 @@
 		mov		cmdline_size, ax
 		
 		mov		flag_error, 0
-		call	ValidateFlags
+		call	ValidateFlags				; valida linha de comando e flags
 		cmp		flag_error, 1
 		jz		fim
-	
-		lea		bx, file_in
-		call	WriteString
+		cmp		tension_error, 1
+		jz		fim
+
+		call	ShowParameters				; exibe informacoes recebidas/settadas pelo programa
 		
-		lea		bx, file_out
-		call    WriteString
-		
-		lea		bx, tension_str
-		call	WriteString
 	
 	fim:
 	.exit
@@ -59,10 +61,35 @@
 ;--------------------------------------------------------------------
 
 ;--------------------------------------------------------------------
+; ShowParameters: função para exibir na tela os parametros recebidos/
+;	settados pelo programa.
+;--------------------------------------------------------------------
+ShowParameters		proc	near
+		lea		bx, I_INFO
+		call	WriteString
+		lea		bx, file_in					; exibe informacoes coletadas na tela (debugging)
+		call	WriteString
+		call 	BreakLine
+		
+		lea		bx, O_INFO
+		call	WriteString
+		lea		bx, file_out
+		call    WriteString
+		call	BreakLine
+		
+		lea		bx, V_INFO
+		call	WriteString
+		lea		bx, tension_str
+		call	WriteString
+		call 	BreakLine
+		
+		ret
+ShowParameters		endp
+
+;--------------------------------------------------------------------
 ; ValidateFlags: verifica se as flags são válida na linha de comando
-; Entrada:
-; Saida: ax = 0: entradas válidas
-;		 ax = 1: uma ou mais flags inválidas
+; Saida: 
+;	flag_error = 1: se houver opcao sem parametro
 ;--------------------------------------------------------------------
 ValidateFlags	proc	near
 		lea		ax, FLAG_I			; procura flag i
@@ -80,9 +107,13 @@ ValidateFlags	proc	near
 		lea		ax, FLAG_V			; procura flag v
 		lea 	cx, tension_str
 		lea		dx, V_ERROR
-		lea		bp, DEFAULT_TENSION_STR
+		lea		bp, DEFAULT_TENSION
 		call 	ValidateFlag
+		cmp		flag_error, 1
+		jz		VF_1
+		call	ValidateTension
 		
+	VF_1:
 		ret
 ValidateFlags	endp
 
@@ -123,6 +154,30 @@ ValidateFlag	proc	near
 	flag_ok:
 		ret
 ValidateFlag	endp
+
+; -------------------------------------------------------------------
+
+;--------------------------------------------------------------------
+ValidateTension	proc	near
+		mov		ax, 0
+		lea		bx, tension_str
+		call	atoi
+		
+		cmp		ax, 127
+		jz		tension_ok
+		cmp		ax, 220
+		jz		tension_ok
+		mov		tension_error, 1
+		lea		bx, V_ERROR_2
+		call	WriteString
+		jmp 	VT_2
+	
+	tension_ok:
+		mov		tension_int, al
+		
+	VT_2:
+		ret
+ValidateTension	endp
 
 ;--------------------------------------------------------------------
 ; FindFlag: procura uma flag no buffer CMDLINE e seta seu valor na
@@ -245,7 +300,41 @@ Strcpy		proc 	near
 Strcpy		endp
 
 ;--------------------------------------------------------------------
-;Função: Escreve o valor de AX na tela
+; atoi: String (bx) -> Inteiro (ax)
+; Obj.: recebe uma string e transforma em um inteiro
+; Ex:
+; lea bx, String1 (Em que String1 é db "2024",0)
+; call atoi
+; -> devolve o numero 2024 em ax	
+;--------------------------------------------------------------------
+atoi	proc near
+		mov		ax, 0
+		
+	atoi_2:
+		; while (*S!='\0') {
+		cmp		byte ptr[bx], 0
+		jz		atoi_1
+
+		; 	A = 10 * A
+		mov		cx, 10
+		mul		cx
+
+		; 	A = A + *S
+		mov		ch, 0
+		mov		cl, [bx]
+		add		ax, cx
+		sub		ax, '0'
+		inc		bx
+		jmp		atoi_2
+
+	atoi_1:
+		ret
+
+atoi	endp
+	
+
+;--------------------------------------------------------------------
+; Função: Escreve o valor de AX na tela
 ;--------------------------------------------------------------------
 WriteWord	proc	near
 		lea		bx, BufferWRWORD
