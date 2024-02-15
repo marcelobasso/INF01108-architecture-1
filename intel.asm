@@ -20,7 +20,8 @@
 		DEFAULT_OUT		DB		'a.out', 0
 		DEFAULT_TENSION	DB 		'127', 0
 		
-		I_ERROR			DB		'Opcao [-i] sem parametro', LF, 0			
+		I_ERROR			DB		'Opcao [-i] sem parametro', LF, 0
+		I_ERROR_2		DB		'Arquivo de entrada nao existente', LF, 0			
 		O_ERROR			DB		'Opcao [-o] sem parametro', LF, 0
 		V_ERROR			DB		'Opcao [-v] sem parametro', LF, 0
 		V_ERROR_2		DB		'Parametro da opcao [-v] deve ser 127 ou 220', LF, 0
@@ -33,7 +34,9 @@
 		; variables
 		cmdline_size	DW		0
 		file_in			DB		80	DUP (?)		; string: arquivo de entrada
+		file_in_handle	DW		0
 		file_out		DB		80 	DUP (?)		; string: arquivo de saida
+		file_out_handle	DW		0
 		tension_str		DB  	80	DUP (?) 	; string: valor de tensao
 		tension_int		DB 		0				; int: tensao convertida
 		flag_error		DB 		0				; int: indica se há erro nas flags
@@ -51,13 +54,32 @@
 		cmp		tension_error, 1
 		jz		fim
 
-		; le arquivo de entrada
-		
+		; abre arquivo de entrada
+		lea		dx, file_in
+		call	fopen
+		jc		file_not_found				; se cf = 1, file_not_found
+		mov		file_in_handle, bx
+
+		; abre arquivo de saida
+		lea		dx, file_out
+		call	fopen
+		jc		create_out_file				; se cf = 1, create_out_file
+		mov		file_out_handle, bx
+		jmp		fim
+		; abriu ambos os arquivos com sucesso
+
+		file_not_found:
+		lea		bx, I_ERROR_2
+		call 	WriteString
+		jmp 	fim
+
+		create_out_file:
 
 		; call	ShowParameters				; exibe informacoes recebidas/settadas pelo programa
 		
 	
 	fim:
+		call 	CloseFiles
 	.exit
 
 ;--------------------------------------------------------------------
@@ -203,6 +225,7 @@ FindFlag	proc	near
 		cmp		dl, 0
 		jnz		FF_2
 		mov		ax, 2			; Caso nao encontrou a flag, retorna 2
+		
 		ret
 		
 	FF_2:
@@ -262,6 +285,7 @@ FindFlag 	endp
 GetNextChar	proc	near
 	inc		bx
 	mov		dl,	[bx]
+	
 	ret
 GetNextChar	endp
 
@@ -311,7 +335,7 @@ Strcpy		endp
 ; call atoi
 ; -> devolve o numero 2024 em ax	
 ;--------------------------------------------------------------------
-atoi	proc near
+atoi	proc 	near
 		mov		ax, 0
 		
 	atoi_2:
@@ -457,6 +481,7 @@ BreakLine	proc	near
 	mov		dl, LF
 	mov		ah, 2
 	int		21h
+	
 	ret
 BreakLine	endp
 		
@@ -477,6 +502,7 @@ fopen	proc	near
 	mov		ah, 3dh
 	int		21h
 	mov		bx, ax
+	
 	ret
 fopen	endp
 
@@ -493,6 +519,7 @@ fcreate	proc	near
 	mov		ah, 3Ch
 	int		21h
 	mov		bx, ax
+	
 	ret
 fcreate	endp
 
@@ -506,6 +533,7 @@ fcreate	endp
 fclose	proc	near
 	mov		ah, 3Eh
 	int		21h
+	
 	ret
 fclose	endp
 
@@ -525,6 +553,7 @@ getChar	proc	near
 	lea		dx, FileBuffer
 	int		21h
 	mov		dl, FileBuffer
+	
 	ret
 getChar	endp
 
@@ -544,9 +573,25 @@ setChar	proc	near
 	mov		FileBuffer, dl
 	lea		dx, FileBuffer
 	int		21h
+	
 	ret
-setChar	endp	
+setChar	endp
 
+;--------------------------------------------------------------------
+; CloseFiles: fecha arquivos usados pelo programa
+; Entrada:
+;	variaveis globais file_in_handle, file_out_handle
+; Saida:
+;	cf = 0, sucesso/1, erro
+;--------------------------------------------------------------------
+CloseFiles	proc	near
+	mov		bx, file_in_handle
+	call	fclose
+	mov		bx, file_out_handle
+	call	fclose
+
+	ret
+CloseFiles	endp
 ;--------------------------------------------------------------------
 	end
 ;--------------------------------------------------------------------
