@@ -28,6 +28,7 @@
 		; buffers
 		CMDLINE			DB 		240 DUP (?) 	; usado na funcao GetCMDLine
 		BufferWRWORD	DB  	80 	DUP (?)		; usado na funcao WriteWord
+		FileBuffer		DB		240 DUP (?)		; usado em funcoes de arquivos
 	
 		; variables
 		cmdline_size	DW		0
@@ -50,7 +51,10 @@
 		cmp		tension_error, 1
 		jz		fim
 
-		call	ShowParameters				; exibe informacoes recebidas/settadas pelo programa
+		; le arquivo de entrada
+		
+
+		; call	ShowParameters				; exibe informacoes recebidas/settadas pelo programa
 		
 	
 	fim:
@@ -339,7 +343,6 @@ atoi	endp
 WriteWord	proc	near
 		lea		bx, BufferWRWORD
 		call	HexToDecAscii
-		
 		lea		bx, BufferWRWORD
 		call	WriteString
 		
@@ -352,20 +355,17 @@ WriteWord	endp
 ; Entra: DS:BX -> Ponteiro para o string
 ;--------------------------------------------------------------------
 WriteString	proc	near
-
-WS_2:
+	WS_2:
 		mov		dl, [bx]		; While (*S!='\0') {
 		cmp		dl, 0
 		jnz		WS_1
 		ret
 
-WS_1:
+	WS_1:
 		mov		ah, 2		; 	Int21(2)
 		int		21H
-
 		inc		bx			; 	++S
 		jmp		WS_2		; }
-
 WriteString	endp
 
 ;--------------------------------------------------------------------
@@ -374,41 +374,41 @@ WriteString	endp
 ; Entra: 
 ;--------------------------------------------------------------------
 GetCMDLine	proc	near
-	push ds ; Salva as informações de segmentos
+	push ds 				; Salva as informações de segmentos
 	push es
 
-	mov ax, ds ; Troca DS com ES para poder usa o REP MOVSB
+	mov ax, ds 				; Troca DS com ES para poder usa o REP MOVSB
 	mov bx, es
 	mov ds, bx
 	mov es, ax
-	mov si, 80h ; Obtém o tamanho do string da linha de comando e coloca em CX
+	mov si, 80h 			; Obtém o tamanho do string da linha de comando e coloca em CX
 	mov ch, 0
 	mov cl, [si]
-	mov ax, cx ; Salva o tamanho do string em AX, para uso futuro
-	mov si, 81h ; Inicializa o ponteiro de origem
-	lea di, CMDLINE ; Inicializa o ponteiro de destino
+	mov ax, cx 				; Salva o tamanho do string em AX, para uso futuro
+	mov si, 81h 			; Inicializa o ponteiro de origem
+	lea di, CMDLINE 		; Inicializa o ponteiro de destino
 	rep movsb
-	pop es ; retorna as informações dos registradores de segmentos 
+	pop es 					; retorna as informações dos registradores de segmentos 
 	pop ds
 	
 GetCMDLine endp
 
-;
 ;--------------------------------------------------------------------
-;Função: Converte um valor HEXA para ASCII-DECIMAL
-;Entra:  (A) -> AX -> Valor "Hex" a ser convertido
-;        (S) -> DS:BX -> Ponteiro para o string de destino
+; HexToDecAscii: Converte um valor HEXA para ASCII-DECIMAL
+; Entra:  
+;	(A) -> AX -> Valor "Hex" a ser convertido
+;   (S) -> DS:BX -> Ponteiro para o string de destino
 ;--------------------------------------------------------------------
 HexToDecAscii	proc near
 
 		mov	cx,0			;N = 0;
-H2DA_2:
+	H2DA_2:
 		or	ax,ax			;while (A!=0) {
 		jnz	H2DA_0
 		or	cx,cx
 		jnz	H2DA_1
 
-H2DA_0:
+	H2DA_0:
 		mov	dx,0			;A = A / 10
 		mov	si,10			;dl = A % 10 + '0'
 		div	si
@@ -420,7 +420,7 @@ H2DA_0:
 		inc	cx				;++N
 		jmp	H2DA_2
 
-H2DA_1:
+	H2DA_1:
 		mov	si,cx			;S[N] = '\0'
 		mov	byte ptr[bx+si],0
 
@@ -431,7 +431,7 @@ H2DA_1:
 
 			sar	cx,1			;N = N / 2
 
-H2DA_4:
+	H2DA_4:
 		or	cx,cx			;while (N!=0) {
 		jz	H2DA_3
 
@@ -448,7 +448,7 @@ H2DA_4:
 		dec	bx				;	--j
 		jmp	H2DA_4
 
-H2DA_3:
+	H2DA_3:
 		ret
 
 HexToDecAscii	endp
@@ -460,6 +460,93 @@ BreakLine	proc	near
 	ret
 BreakLine	endp
 		
+;====================================================================
+;					FUNÇÕES PARA ARQUIVOS
+;====================================================================
+
+;--------------------------------------------------------------------
+; fopen: Dado o caminho para um arquivo, devolve o ponteiro desse arquivo
+; Entrada: 
+;	dx: nome do arquivo
+; Saida:
+;	bx: ponteiro para o arquivo
+;	cf = 0, sucesso/ 1, erro
+;--------------------------------------------------------------------
+fopen	proc	near
+	mov		al, 0
+	mov		ah, 3dh
+	int		21h
+	mov		bx, ax
+	ret
+fopen	endp
+
+;--------------------------------------------------------------------
+; fcreate: Dado um nome de arquivo, o cria
+; Entrada:
+;	dx: string nome do arquivo
+; Saida:
+;	bx: ponteiro para arquivo aberto
+; 	cf = 0, sucesso/1, erro
+;--------------------------------------------------------------------
+fcreate	proc	near
+	mov		cx, 0
+	mov		ah, 3Ch
+	int		21h
+	mov		bx, ax
+	ret
+fcreate	endp
+
+;--------------------------------------------------------------------
+; fclose: Fecha stream de arquivo
+; Entrada:
+;	bx: ponteiro para o arquivo
+; Saida:
+; 	cf = 0, sucesso/1, erro
+;--------------------------------------------------------------------
+fclose	proc	near
+	mov		ah, 3Eh
+	int		21h
+	ret
+fclose	endp
+
+;--------------------------------------------------------------------
+; getChar: Dado um arquivo, devolve um caractere, a posicao do cursor 
+;	e define CF como 0 se a leitura deu certo
+; Entrada:
+;	bx: ponteiro para o arquivo
+; Saida:
+;	dl: caractere lido (ASCII)
+;	ax: posicao do cursor
+; 	cf = 0, sucesso/1, erro
+;--------------------------------------------------------------------
+getChar	proc	near
+	mov		ah, 3Fh
+	mov		cx, 1				; number of bytes to read
+	lea		dx, FileBuffer
+	int		21h
+	mov		dl, FileBuffer
+	ret
+getChar	endp
+
+;--------------------------------------------------------------------
+; setChar: Dado um arquivo e um caractere, escreve esse caractere no 
+;	arquivo e devolve a posicao do cursor e define CF como 0 se a leitura deu certo
+; Entrada:
+;	bx: ponteiro para o arquivo
+; 	dl: char a ser escrito
+; Saida:
+;	ax: posicao do cursor
+; 	cf = 0, sucesso/1, erro
+;--------------------------------------------------------------------
+setChar	proc	near
+	mov		ah, 40h
+	mov		cx, 1				; number of bytes to write
+	mov		FileBuffer, dl
+	lea		dx, FileBuffer
+	int		21h
+	ret
+setChar	endp	
+
 ;--------------------------------------------------------------------
 	end
 ;--------------------------------------------------------------------
