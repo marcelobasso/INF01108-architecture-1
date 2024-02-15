@@ -3,56 +3,55 @@
 	.stack
 
 	.data
-		; constantes
-		CR		equ		13					; Carriage Return (Enter)
-		LF		equ		10  				; Line Feed ('\n')
-		SPACE	equ		' '
-		HYPHEN	equ		'-'
-		FLAG_I			equ 	'i'			
-		DEFAULT_IN		equ		'a.in'
-		I_ERROR			DB		'Opcao [-i] sem parametro', LF, 0
-		FLAG_O			equ 	'o'			
-		DEFAULT_OUT		equ		'a.out'
-		O_ERROR			DB		'Opcao [-o] sem parametro', LF, 0
-		FLAG_V			equ 	'v'			; 127 ou 220
+		; constantes e strings
+		CR			equ		13					; Carriage Return (Enter)
+		LF			equ		10  				; Line Feed ('\n')
+		SPACE		equ		' '
+		HYPHEN		equ		'-'
 		DEFAULT_TENSION	equ		127
+		FLAG_I			DB 		'i'			
+		DEFAULT_IN		DB		'a.in', 0
+		I_ERROR			DB		'Opcao [-i] sem parametro', LF, 0
+		FLAG_O			DB 		'o'			
+		DEFAULT_OUT		DB		'a.out', 0
+		O_ERROR			DB		'Opcao [-o] sem parametro', LF, 0
+		FLAG_V			DB 		'v'
+		DEFAULT_TENSION_STR		DB 	'127', 0
 		V_ERROR			DB		'Opcao [-v] sem parametro', LF, 0
-		
+		V_ERROR_2		DB		'Parametro da opcao [-v] deve ser 127 ou 220', LF, 0
 		
 		; buffers
-		CMDLINE			DB 	240 DUP (0) 	; usado na funcao GetCMDLine
-		BufferWRWORD	DB  80 	DUP (0)		; usado na funcao WriteWord
+		CMDLINE			DB 	240 DUP (?) 	; usado na funcao GetCMDLine
+		BufferWRWORD	DB  80 	DUP (?)		; usado na funcao WriteWord
 	
 		; variables
 		cmdline_size	DW	0
-		file_in			DB	80	DUP (0)		; string: arquivo de entrada
-		file_out		DB	80 	DUP (0)		; string: arquivo de saida
-		tension			DB  0 				; int: valor de tensao
+		file_in			DB	80	DUP (?)		; string: arquivo de entrada
+		file_out		DB	80 	DUP (?)		; string: arquivo de saida
+		tension_str		DB  80	DUP (?) 	; string: valor de tensao
+		tension_int		DB 	0				; int: tensao convertida
+		flag_error		DB 	0				; int: indica se há erro nas flags
 		
 	.code
 	.startup
 		call	GetCMDLine					; le linha do CMD	
 		mov		cmdline_size, ax
-		; lea	bx, CMDLINE
-		; call 	WriteString					; escreve a linha lida na tela (debugging)
 		
-		lea		bx, CMDLINE
-		lea		bp, file_in
-		call 	Strcpy
+		mov		flag_error, 0
+		call	ValidateFlags
+		cmp		flag_error, 1
+		jz		fim
+	
 		lea		bx, file_in
 		call	WriteString
 		
-		; validar flags
-		;lea		ah, FLAG_I
-		;lea		al, DEFAULT_IN
-		;lea		cl, file_in
-		;call 		FindFlag
-		;mov		ah, 4CH
-		;pop		bx
-		;mov		bh, 0
-		;mov		al, bl
-		;int		21H
+		lea		bx, file_out
+		call    WriteString
 		
+		lea		bx, tension_str
+		call	WriteString
+	
+	fim:
 	.exit
 
 ;--------------------------------------------------------------------
@@ -60,81 +59,141 @@
 ;--------------------------------------------------------------------
 
 ;--------------------------------------------------------------------
-; FindFlag: procura uma flag no buffer CMDLINE e seta seu valor ou exibe mensagem.
-; entra: ah: flag a ser encontrada
-;		 al: valor padrao caso nao encontrar
-;		 bx: Usada internamente como ponteiro para CMDLINE
-;		 cl: ponteiro para variavel a ser settada
-; retorna:
-;		 empilha 1 caso deu erro (flag sem parametro), 0 caso achou a flag ou setou padrao
+; ValidateFlags: verifica se as flags são válida na linha de comando
+; Entrada:
+; Saida: ax = 0: entradas válidas
+;		 ax = 1: uma ou mais flags inválidas
 ;--------------------------------------------------------------------
-; FindFlag	proc	near
-		; mov		bx, CMDLINE
-	
-	; FF_1:
-		; mov		dl, byte [bx]		; While (*S!='\0') {
-		; cmp		dl, 0
-		; jnz		FF_2
-		; ; nao encontrou a flag (setta padrao apontado por al)
-		; push	0
-		; cmp		byte [ah], FLAG_V
-		; jnz		FF_string
-		; mov		cl, byte DEFAULT_TENSION
-		; ret
+ValidateFlags	proc	near
+		lea		ax, FLAG_I			; procura flag i
+		lea 	cx, file_in
+		lea		dx, I_ERROR
+		lea		bp, DEFAULT_IN
+		call 	ValidateFlag
 		
-	; FF_string:
-		; mov		ah, al
-		; mov		al, cl
-		; call	Strcpy
-		; ret
+		lea		ax, FLAG_O			; procura flag o
+		lea 	cx, file_out
+		lea		dx, O_ERROR
+		lea		bp, DEFAULT_OUT
+		call 	ValidateFlag
 		
-	; FF_2:
-		; cmp		dl, SPACE		; procura a sequencia " -FLAG " onde flag pode ser i, o ou v
-		; jnz		FF_3
+		lea		ax, FLAG_V			; procura flag v
+		lea 	cx, tension_str
+		lea		dx, V_ERROR
+		lea		bp, DEFAULT_TENSION_STR
+		call 	ValidateFlag
 		
-		; call 	GetNextChar
-		; cmp		dl, HYPHEN
-		; jnz		FF_3
-		
-		; call	GetNextChar
-		; cmp		dl, byte [ah]
-		; jnz		FF_3
-		
-		; call	GetNextChar
-		; cmp		dl, SPACE
-		; jnz		FF_3
-		
-		; ; --- encontrou a flag desejada ---
-		
-		; ; flag sem parametro (erro 1)
-		; call	GetNextChar
-		; cmp		dl, HYPHEN
-		; jz		FF_error
-		; cmp		dl, 0
-		; jz		FF_error
-		; jmp		FF_found
-		
-	; FF_error:
-		; ; escreve mensagem de erro 'Opcao [- ] sem parametro',
-		; mov		bx,	cx
-		; call	WriteString
-		; push 	1
-		; ret
-		
-		
-	; FF_found:
-		; ; setta valor na variavel (sem erro)
-		; mov		ah, bx
-		; mov		al,	cl
-		; call	Strcpy
-		; push 	0
-		; ret
-		
-	; FF_3:	
-		; inc		bx
-		; jmp		FF_1
+		ret
+ValidateFlags	endp
 
-; FindFlag 	endp
+;--------------------------------------------------------------------
+; ValidateFlag: verifica se uma flag é válida na linha de comando.
+; entra: ax: flag a ser encontrada
+;		 bp: Valor padrao a ser settado caso nao houver flag
+;		 dx: Mensagem de erro
+;		 cx: ponteiro para variavel a ser settada
+; retorna:
+;		 flag_error = 1: se houver opcao sem parametro
+;--------------------------------------------------------------------
+ValidateFlag	proc	near
+		push	bp					; empilha parametros
+		push	cx
+		push	dx
+		call	FindFlag
+		pop		dx					; desempilha parametros
+		pop		cx
+		pop		bp
+		
+		cmp		ax, 0				; verifica retorno da FindFlag
+		jz		flag_ok
+		
+		cmp		ax, 1
+		jz		flag_sem_param
+	
+		mov		bx, bp				; seta valor padrao caso nao houver a flag (ax = 2)
+		mov		bp, cx
+		call	Strcpy
+		jmp		flag_ok
+		
+	flag_sem_param:
+		mov 	bx, dx				; printa mensagem de erro passada pelo dx
+		call	WriteString
+		mov		flag_error, 1
+		
+	flag_ok:
+		ret
+ValidateFlag	endp
+
+;--------------------------------------------------------------------
+; FindFlag: procura uma flag no buffer CMDLINE e seta seu valor na
+;			variavel indicada.
+; entra: ax: flag a ser encontrada
+;		 bx: Usada internamente como ponteiro para CMDLINE
+;		 cx: ponteiro para variavel a ser settada caso houver entrada
+; retorna:
+;		 ax = 0: achou a flag e settou valor
+;		 ax = 1: erro (flag sem parametro), 
+;		 ax = 2: nao achou a flag
+;--------------------------------------------------------------------
+FindFlag	proc	near
+		lea		bx, CMDLINE
+		mov		dh, 0
+	
+	FF_1:
+		mov		dl, [bx]		; While (*S!='\0') {
+		cmp		dl, 0
+		jnz		FF_2
+		mov		ax, 2			; Caso nao encontrou a flag, retorna 2
+		ret
+		
+	FF_2:
+		cmp		dl, SPACE		; procura a sequencia " -FLAG " onde flag pode ser i, o ou v
+		jnz		FF_3
+		
+		call 	GetNextChar
+		cmp		dl, HYPHEN
+		jnz		FF_3
+		
+		call	GetNextChar
+		mov		bp, ax
+		cmp		dl, [bp]
+		jnz		FF_3
+		
+		call	GetNextChar
+		cmp		dl, 0
+		jz		FF_error
+		cmp		dl, SPACE
+		jnz		FF_3
+		
+		; --- encontrou a flag desejada ---
+		call	GetNextChar 		; verifica flag sem parametro (retorna 1)
+		cmp		dl, 0
+		jz		FF_error
+		cmp		dl, HYPHEN
+		jz		FF_error
+		cmp		dl, LF
+		jz 		FF_error
+		cmp		dl, CR
+		jz		FF_error
+		cmp		dl, SPACE
+		jz		FF_error
+		jmp		FF_found
+		
+	FF_error:
+		mov		ax, 1				; retorna 1 indicando que flag nao tem parametro
+		ret
+		
+	FF_found:
+		mov		bp, cx				; caso nenhum erro ocorreu, setta valor na variavel indicada
+		call	Strcpy
+		mov		ax, 0				; retorna 0 indicando sucesso
+		ret
+		
+	FF_3:	
+		inc		bx
+		jmp		FF_1
+
+FindFlag 	endp
 
 ;--------------------------------------------------------------------
 ; GetNextChar: dl <- [++bx]
@@ -143,7 +202,7 @@
 ;--------------------------------------------------------------------
 GetNextChar	proc	near
 	inc		bx
-	mov		dl,	byte [bx]
+	mov		dl,	[bx]
 	ret
 GetNextChar	endp
 
@@ -162,8 +221,7 @@ Strcpy		proc 	near
 		jmp 	CP_repeat       ; Repeat until non-space character is found
 
 	CP_1:
-		; copia ate encontra espaco, final da string, cr ou lf
-		mov		al, [bx]
+		mov		al, [bx] 		; copia ate encontra espaco, final da string, CR ou LF
 		cmp		al, 0
 		jz		CP_end
 		cmp		al, SPACE
@@ -181,8 +239,7 @@ Strcpy		proc 	near
 		jmp		CP_1
 		
 	CP_end:
-		inc		bp
-		mov		byte [bp], 0
+		mov		[bp], 0
 		ret
 
 Strcpy		endp
@@ -307,6 +364,12 @@ H2DA_3:
 
 HexToDecAscii	endp
 
+BreakLine	proc	near
+	mov		dl, LF
+	mov		ah, 2
+	int		21h
+	ret
+BreakLine	endp
 		
 ;--------------------------------------------------------------------
 	end
