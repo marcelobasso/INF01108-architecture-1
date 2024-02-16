@@ -14,7 +14,7 @@
 		FLAG_O			DB 		'o'
 		FLAG_V			DB 		'v'
 		
-		I_INFO			DB 		'-i: ', 0			; string usadas na funcao ShowParameters
+		I_INFO			DB 		'-i: ', 0			; string usadas na funcao GenerateReport
 		O_INFO			DB 		'-o: ', 0
 		V_INFO			DB 		'-v: ', 0
 		
@@ -22,13 +22,16 @@
 		DEFAULT_OUT		DB		'a.out', 0
 		DEFAULT_TENSION	DB 		'127', 0
 		
-		I_ERROR			DB		'Opcao [-i] sem parametro', LF, 0
-		I_ERROR_2		DB		'Arquivo de entrada nao existente', LF, 0			
-		O_ERROR			DB		'Opcao [-o] sem parametro', LF, 0
-		V_ERROR			DB		'Opcao [-v] sem parametro', LF, 0
-		V_ERROR_2		DB		'Parametro da opcao [-v] deve ser 127 ou 220', LF, 0
+		I_ERROR			DB		'Opcao [-i] sem parametro', CR, LF, 0
+		I_ERROR_2		DB		'Arquivo de entrada nao existente', CR, LF, 0			
+		O_ERROR			DB		'Opcao [-o] sem parametro', CR, LF, 0
+		V_ERROR			DB		'Opcao [-v] sem parametro', CR, LF, 0
+		V_ERROR_2		DB		'Parametro da opcao [-v] deve ser 127 ou 220', CR, LF, 0
 		INV_LINE_1		DB		'Linha ', 0
 		INV_LINE_2		DB		' invalida: ', 0
+		TOTAL_TIME		DB		'Tempo total: ', 0
+		ADEQUATE_TIME	DB		'Tempo tensao adequada (qualidade): ', 0
+		NOT_TIME		DB		'Tempo sem tensao: ', 0
 		
 		; buffers
 		CMDLINE			DB 		240 DUP (?) 	; usado na funcao GetCMDLine
@@ -38,6 +41,9 @@
 		TensionBuffer	DB		8	DUP (?)		; usado para validar tensoes (ProcessTension)
 	
 		; variables
+		sw_m			DW		0
+		sw_n			DW		0
+		sw_f			DW		0				; variaveis usadas em sprintf_w
 		cmdline_size	DW		0
 		file_in			DB		80	DUP (?)		; string: arquivo de entrada
 		file_in_handle	DW		0
@@ -50,12 +56,11 @@
 		tension_error	DB		0				; int: indica se tensão é válida
 		atoi_error		DB		0				; int: indica se conversao foi bem sucedida
 		line_count		DW		0				; int: contador de linhas
-		tension_counter	DW		0				; int: contador de tensoes validas (para validacao de linha)
-		sw_m			DW		0
-		sw_n			DW		0
-		sw_f			DW		0				; variaveis usadas em sprintf_w
-		time_adq_tension	DB		0
-		time_no_tension		DB		0
+		invalid_reading			DB		0		; int: indica se houve alguma leitura invalida no arquivo
+		tension_counter			DW		0		; int: contador de tensoes validas (para validacao de linha)
+		adq_tension_counter		DW		0
+		time_adq_tension		DW		0
+		time_no_tension			DW		0
 		
 	.code
 	.startup
@@ -69,15 +74,22 @@
 		cmp		tension_error, 1			; caso houver tensao inválida, finaliza
 		jz		fim
 		
-		call	OpenFiles
+		call	OpenFileIn
 		cmp		ax,	1						; caso o arquivo de entrada nao existir, finaliza
 		jz		fim
 
 		call	ProcessFile					; processa arquivo de entrada e gera saidas
-		call	ShowParameters				; exibe informacoes recebidas/settadas pelo programa
+		mov		bx, file_in_handle
+		call	fclose
+		cmp		invalid_reading, 1			; caso houve alguma leitura invalida no arquivo de entrada, finaliza
+		jz		fim
+		
+		; caso nao ocorreu nenhum erro na linha de comando, nem há nenhuma linha inválida no arquivo de entrada
+		call	OpenFileOut					; escreve informacoes no arquivo de relatorio
+		call	GenerateReport				; exibe informacoes recebidas/settadas pelo programa na tela
+		call	fclose
 		
 	fim:
-		call 	CloseFiles
 	.exit
 
 ;--------------------------------------------------------------------
@@ -118,7 +130,8 @@ ProcessFile		endp
 ;--------------------------------------------------------------------
 ProcessLine		proc	near
 		mov		dx, 0					; conta n de tensoes abaixo de 10
-		mov		tension_counter, 0
+		mov		tension_counter, 0		; conta n de tensoes valid existentes na linha
+		mov		adq_tension_counter, 0	; conta n de tensoes adequadas existes na linha
 		lea		bx,	LineBuffer		
 		
 	PL_loop:
@@ -137,6 +150,7 @@ ProcessLine		proc	near
 		jz		PL_noT
 		cmp		ax, 3					; caso tensao nao é adequada
 		jz		PL_next
+		inc		adq_tension_counter
 		
 	PL_next:
 		inc		bx
@@ -148,9 +162,13 @@ ProcessLine		proc	near
 		jz		PL_verify
 		jmp 	PL_loop
 		
-	PL_verify:							; verifica se na linha há, exatamente, 3 tensoes validas
+	PL_verify:							
+		cmp		adq_tension_counter, 3	; se houver menos de 3 tensoes adequadas, linha inadequada
+		jnz		PL_IT
 		inc		time_adq_tension
-		cmp		tension_counter, 3
+		
+	PL_IT:
+		cmp		tension_counter, 3		; se houver menos de 3 tensoes validas, linha invalida
 		jz		PL_end
 		jmp		PL_invalid
 		
@@ -162,7 +180,6 @@ ProcessLine		proc	near
 		jmp		PL_end
 		
 	PL_invalid:
-
 		push	bx
 		lea		bx, INV_LINE_1
 		call	WriteString
@@ -175,8 +192,8 @@ ProcessLine		proc	near
 		call	WriteString
 		lea		bx, LineBuffer
 		call	WriteString
-		call	BreakLine
 		mov		ax, 1
+		mov		invalid_reading, 1
 		pop		bx
 		
 	PL_end:
@@ -184,7 +201,7 @@ ProcessLine		proc	near
 ProcessLine		endp
 
 ;--------------------------------------------------------------------
-; ProcessTension: valida tensao lida em uma linha do arquivo
+; ProcessTension: valida uma das tensoes de uma linha do arquivo
 ; Saida:
 ;	ax = 0 - valido | 1 - invalido | 2 - sem tensao | 3 - inadequado
 ;--------------------------------------------------------------------
@@ -238,33 +255,83 @@ ProcessTension	proc	near
 ProcessTension	endp
 
 ;--------------------------------------------------------------------
-; ShowParameters: função para exibir na tela os parametros recebidos/
-;	settados pelo programa.
+; GenerateReport: função para exibir na tela os parametros recebidos/
+;	settados pelo programa e escrever no arquivo de saida
 ;--------------------------------------------------------------------
-ShowParameters		proc	near
+GenerateReport		proc	near
 		lea		bx, I_INFO				; exibe informacoes da flag i
 		call	WriteString
 		lea		bx, file_in
 		call	WriteString
 		call 	BreakLine
+		mov		bx, file_out_handle		; escreve -i no arquivo de saida
+		lea		bp, I_INFO
+		lea		ax, file_in
+		call	WriteToFile
 		
 		lea		bx, O_INFO				; exibe informacoes da flag o
 		call	WriteString
 		lea		bx, file_out
 		call    WriteString
 		call	BreakLine
+		mov		bx, file_out_handle		; escreve -o no arquivo de saida
+		lea		bp, O_INFO
+		lea		ax, file_out
+		call	WriteToFile
 		
 		lea		bx, V_INFO				; exibe informacoes da flag v
 		call	WriteString
 		lea		bx, tension_str
 		call	WriteString
 		call 	BreakLine
+		mov		bx, file_out_handle		; escreve -v no arquivo de saida
+		lea		bp, V_INFO
+		lea		ax, tension_str
+		call	WriteToFile
+		call	BreakLineF
 		
-		; mov		ax, line_count		; exibe numero de linhas lidas
-		; call	WriteWord
+		lea		bx, TOTAL_TIME
+		call	WriteString
+		mov		ax, line_count			; exibe numero de linhas lidas
+		lea		bx, BufferWRWORD
+		call	sprintf_w
+		lea		bx, BufferWRWORD
+		call	WriteString
+		mov		bx, file_out_handle
+		lea		bp, TOTAL_TIME
+		lea		ax, BufferWRWORD
+		call	WriteToFile
+		
+		mov		ax, time_adq_tension	; exibe tempo com tensao adequada (qualidade de tensao)
+		lea		bx, BufferWRWORD
+		call	sprintf_w
+		mov		bx, file_out_handle
+		lea		bp, ADEQUATE_TIME
+		lea		ax, BufferWRWORD
+		call	WriteToFile
+		
+		mov		ax, time_no_tension		; exibe tempo sem tensao
+		lea		bx, BufferWRWORD
+		call	sprintf_w
+		mov		bx, file_out_handle
+		lea		bp, NOT_TIME
+		lea		ax, BufferWRWORD
+		call	WriteToFile
 		
 		ret
-ShowParameters		endp
+GenerateReport		endp
+
+WriteToFile		proc	near
+		push 	ax
+		call	setLine
+		call	SpaceF
+		pop		ax
+		mov		bp, ax
+		call	setLine
+		call	BreakLineF
+		
+		ret
+WriteToFile		endp
 
 ;--------------------------------------------------------------------
 ; ValidateFlags: verifica se as flags são válida na linha de comando
@@ -670,43 +737,43 @@ HexToDecAscii	endp
 ; 	bx: contem a string resultante
 ;--------------------------------------------------------------------
 sprintf_w	proc	near
-		mov		sw_n,ax
-		mov		cx,5
-		mov		sw_m,10000
-		mov		sw_f,0
+		mov		sw_n, ax
+		mov		cx, 5
+		mov		sw_m, 10000
+		mov		sw_f, 0
 
 	sw_do:
-		mov		dx,0
-		mov		ax,sw_n
+		mov		dx, 0
+		mov		ax, sw_n
 		div		sw_m
-		cmp		al,0
+		cmp		al, 0
 		jne		sw_store
-		cmp		sw_f,0
+		cmp		sw_f, 0
 		je		sw_continue
 	sw_store:
-		add		al,'0'
-		mov		[bx],al
+		add		al, '0'
+		mov		[bx], al
 		inc		bx
 		
-		mov		sw_f,1
+		mov		sw_f, 1
 	sw_continue:
-		mov		sw_n,dx
-		mov		dx,0
-		mov		ax,sw_m
-		mov		bp,10
+		mov		sw_n, dx
+		mov		dx, 0
+		mov		ax, sw_m
+		mov		bp, 10
 		div		bp
-		mov		sw_m,ax
+		mov		sw_m, ax
 		dec		cx
-		cmp		cx,0
+		cmp		cx, 0
 		jnz		sw_do
 
-		cmp		sw_f,0
+		cmp		sw_f, 0
 		jnz		sw_continua2
-		mov		[bx],'0'
+		mov		[bx], '0'
 		inc		bx
 
 	sw_continua2:
-		mov		byte ptr[bx],0
+		mov		byte ptr[bx], 0
 		ret	
 sprintf_w	endp
 
@@ -720,6 +787,21 @@ BreakLine	proc	near
 	ret
 BreakLine	endp
 		
+BreakLineF	proc	near
+	mov		dx, CR
+	call	setChar
+	mov		dx, LF
+	call	setChar
+	
+	ret
+BreakLineF	endp
+
+SpaceF		proc	near
+	mov		dx, ' '
+	call	setChar
+	
+	ret
+SpaceF		endp
 ;====================================================================
 ;===================== FUNÇÕES PARA ARQUIVOS ========================
 ;====================================================================
@@ -793,6 +875,26 @@ getChar	proc	near
 getChar	endp
 
 ;--------------------------------------------------------------------
+; setChar: Dado um arquivo e um caractere, escreve esse caractere no 
+;	arquivo e devolve a posicao do cursor e define CF como 0 se a leitura deu certo
+; Entrada:
+;	bx: ponteiro para o arquivo
+; 	dl: char a ser escrito
+; Saida:
+;	ax: posicao do cursor
+; 	cf = 0, sucesso/1, erro
+;--------------------------------------------------------------------
+setChar	proc	near
+	mov		ah, 40h
+	mov		cx, 1				; number of bytes to write
+	mov		FileBuffer, dl
+	lea		dx, FileBuffer
+	int		21h
+	
+	ret
+setChar	endp
+
+;--------------------------------------------------------------------
 ; GetLine: Lê uma linha do arquivo de entrada (até encontrar LF, CR ou 0)
 ; Entrada:
 ;	bx: ponteiro para arquivo
@@ -847,80 +949,70 @@ GetLine		proc	near
 GetLine		endp
 
 ;--------------------------------------------------------------------
-; setChar: Dado um arquivo e um caractere, escreve esse caractere no 
-;	arquivo e devolve a posicao do cursor e define CF como 0 se a leitura deu certo
+; setLine: Dado um arquivo e uma string, escreve a string no arquivo
 ; Entrada:
 ;	bx: ponteiro para o arquivo
-; 	dl: char a ser escrito
+; 	bp: ponteiro para a string
 ; Saida:
 ;	ax: posicao do cursor
 ; 	cf = 0, sucesso/1, erro
 ;--------------------------------------------------------------------
-setChar	proc	near
-	mov		ah, 40h
-	mov		cx, 1				; number of bytes to write
-	mov		FileBuffer, dl
-	lea		dx, FileBuffer
-	int		21h
-	
-	ret
-setChar	endp
+setLine	proc	near
+	SL_loop:
+		mov		dx, [bp]
+		cmp		dx, 0
+		je		SL_end	
+		cmp		dx, 32						; caractere aparecendo DO NADA
+		je      SL_end
+		cmp		dx, CR
+		jz		SL_end
+		cmp		dx, LF
+		jz		SL_end
+		call	setChar
+		inc		bp
+		jmp		SL_loop
+		
+		
+	SL_end:
+		ret
+setLine	endp
 
 ;--------------------------------------------------------------------
-; OpenFiles: abre os arquivos de entrada e saida de dados
+; OpenFileIn: abre o arquivo de entrada
 ; Saida:
 ; 	ax = 1, caso o arquivo de entrada nao existir
-; 	file_in_handle, file_out_handle: ponteiros para arquivos abertos
+; 	file_in_handle: ponteiros para arquivo aberto
 ;--------------------------------------------------------------------
-OpenFiles	proc	near
+OpenFileIn	proc	near
 		mov		ax, 0						; seta retorno como 0
 		
 		lea		dx, file_in					; abre arquivo de entrada
 		call	fopen
-		jc		file_not_found				; se cf = 1, file_not_found
-		mov		file_in_handle, bx
+		jnc		in_file_ok					; se cf = 0, in_file_ok
 
-		lea		dx, file_out				; abre arquivo de saida
-		call	fopen
-		jc		create_out_file				; se cf = 1, create_out_file
-		mov		file_out_handle, bx
-		jmp		files_ok
-		
-	file_not_found:
-		lea		bx, I_ERROR_2
+		lea		bx, I_ERROR_2				; arquivo nao existe
 		call 	WriteString
 		mov		ax, 1
-		jmp		files_ok
+	
+	in_file_ok:
+		mov		file_in_handle, bx
+		ret
+OpenFileIn	endp
 
-	create_out_file:
+;--------------------------------------------------------------------
+; OpenFileOut: abre o arquivo de saida
+; Saida:
+; 	file_in_handle: ponteiros para arquivo aberto
+;--------------------------------------------------------------------
+OpenFileOut	proc	near
 		lea		dx, file_out
 		call	fcreate
 		mov		file_out_handle, bx
 	
-	files_ok:
+	out_file_ok:
 		ret
-OpenFiles	endp
+OpenFileOut endp
 
-;--------------------------------------------------------------------
-; CloseFiles: fecha arquivos usados pelo programa
-; Entrada:
-;	variaveis globais file_in_handle, file_out_handle
-; Saida:
-;	cf = 0, sucesso/1, erro
-;--------------------------------------------------------------------
-CloseFiles	proc	near
-		cmp		file_in_handle, 0
-		jz		files_closed			; caso nao houver entrada, finaliza
-		
-		mov		bx, file_in_handle		; fecha arquivo de entrada
-		call	fclose
-		
-		mov		bx, file_out_handle		; fecha arquivo de saida
-		call	fclose
-	
-	files_closed:
-		ret
-CloseFiles	endp
 ;--------------------------------------------------------------------
 	end
 ;--------------------------------------------------------------------
