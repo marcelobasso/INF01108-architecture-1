@@ -48,9 +48,11 @@
 		tension_line	DW		0				; int: valor de tensao lida do arquivo
 		flag_error		DB 		0				; int: indica se há erro nas flags
 		tension_error	DB		0				; int: indica se tensão é válida
-		line_count		DB		0				; int: contador de linhas
-		time_tension_ok	DB		0
-		time_no_tension	DB		0
+		atoi_error		DB		0				; int: indica se conversao foi bem sucedida
+		line_count		DW		0				; int: contador de linhas
+		tension_counter	DW		0				; int: contador de tensoes validas (para validacao de linha)
+		time_adq_tension	DB		0
+		time_no_tension		DB		0
 		
 	.code
 	.startup
@@ -63,12 +65,13 @@
 		jz		fim
 		cmp		tension_error, 1			; caso houver tensao inválida, finaliza
 		jz		fim
+		
 		call	OpenFiles
 		cmp		ax,	1						; caso o arquivo de entrada nao existir, finaliza
 		jz		fim
 
+		call	ProcessFile					; processa arquivo de entrada e gera saidas
 		call	ShowParameters				; exibe informacoes recebidas/settadas pelo programa
-		call	ProcessFile
 		
 	fim:
 		call 	CloseFiles
@@ -87,77 +90,86 @@
 ;	prints na tela com as informacoes de linhas invalidas
 ;--------------------------------------------------------------------
 ProcessFile		proc	near
-; ler linha do Arquivo
 		mov		bx, file_in_handle
-		
-	PF_loop:
-		call	GetLine
-		inc		line_count
-		cmp		ax, 1				; caso chegou ao final do arquivo
-		jz		PF_end
-		
-; chamar processLine
-		push	bx
-		call	ProcessLine
-		pop		bx
-; checar se chegou no final do Arquivo
-; volta ao inicio
 
+	PF_loop:
+		call	GetLine				; le linha do arquivo
+		cmp		ax, 1				; caso chegou ao final do arquivo, finaliza
+		jz		PF_end
+		inc		line_count			; incrementa contador de linhas
+		push	bx					; salva bx
+		call	ProcessLine			; chamar processLine
+		pop		bx					; devolve valor de bx
+		jmp		PF_loop				; volta ao inicio
+		
 	PF_end:
 		ret
 ProcessFile		endp
 
 ;--------------------------------------------------------------------
-; ProcessLine: valida informacoes da linha e exibe mensagem na tela
+; ProcessLine: checa se linha é valida (0 <= tensao <= 499)
 ; Entrada:
 ; 	LineBuffer: linha a ser validada
 ; Saida:
-; 	ax:	0 linha valida, 1 linha invalida
+; 	ax:	0 linha valida, 1 linha invalida 
 ;--------------------------------------------------------------------
 ProcessLine		proc	near
-		mov		cx, 0					; conta n de tensoes abaixo de 10
-		lea		bx,	LineBuffer
+		mov		dx, 0					; conta n de tensoes abaixo de 10
+		mov		tension_counter, 0
+		lea		bx,	LineBuffer		
 		
 	PL_loop:
-		push	cx
+		push	dx
 		lea		bp,	TensionBuffer
+		mov		cx, 1
 		call	Strcpy				
 		push	bx
-		lea		bx, TensionBuffer		; converte primeira tensao para inteiro
-		call	atoi
-		mov		tension_line, ax
 		call	ProcessTension			; valida tensao
 		pop		bx
-		pop		cx		
+		pop		dx
 		
-		cmp		ax, 0
+		cmp		ax, 1					; caso for linha invalida, fora do intervalo 0-499
+		jz		PL_invalid
+		cmp		ax, 2					; caso for linha com interrupcao de tensao
+		jz		PL_noT
+		cmp		ax, 3					; caso tensao nao é adequada
 		jz		PL_next
-		cmp		ax, 1
-		jz		PL_invalid		
-		inc		cx						; caso nao tiver tensao (ax = 2)	
-		cmp		cx, 3
-		jne		PL_next
-		inc		time_no_tension			; caso os 3 fios esteverem com tensaoo abaixo de 10, inc time_no_tension
 		
 	PL_next:
 		inc		bx
 		cmp		[bx], LF
-		jz		PL_end
+		jz		PL_verify
 		cmp		[bx], CR
-		jz		PL_end
+		jz		PL_verify
 		cmp		[bx], 0
+		jz		PL_verify
+		jmp 	PL_loop
+		
+	PL_verify:							; verifica se na linha há, exatamente, 3 tensoes validas
+		inc		time_adq_tension
+		cmp		tension_counter, 3
 		jz		PL_end
-		jmp		PL_loop
-			
+		jmp		PL_invalid
+		
+	PL_noT:
+		inc		dx						; caso nao tiver tensao (ax = 2)	
+		cmp		dx, 3
+		jne		PL_next
+		inc		time_no_tension			; caso os 3 fios esteverem com tensaoo abaixo de 10, inc time_no_tension
+		jmp		PL_end
+		
 	PL_invalid:
+
 		push	bx
 		lea		bx, INV_LINE_1
 		call	WriteString
-		; escreve numero da linha
+		; TODO - escrever numero da linha
 		lea		bx, INV_LINE_2
 		call	WriteString
 		lea		bx, LineBuffer
 		call	WriteString
+		call	BreakLine
+		mov		ax, 1
 		pop		bx
 		
 	PL_end:
@@ -165,37 +177,54 @@ ProcessLine		proc	near
 ProcessLine		endp
 
 ;--------------------------------------------------------------------
-; ProcessTension: valida tensao atual lida do arquivo
+; ProcessTension: valida tensao lida em uma linha do arquivo
 ; Saida:
-;	ax = 0 - valido | 1 - invalido | 2 - sem tensao
+;	ax = 0 - valido | 1 - invalido | 2 - sem tensao | 3 - inadequado
 ;--------------------------------------------------------------------
 ProcessTension	proc	near
+		inc		tension_counter
+		lea		bx, TensionBuffer		; converte primeira tensao para inteiro
+		call	atoi
+		cmp		atoi_error, 1			; caso atoi retornar erro
+		jz		PT_invalid
+		
+		mov		tension_line, ax
 		mov		ax, 0
 		
 		cmp		tension_line, 10
 		jl		PT_noT
 		
+		cmp		tension_line, 0
+		jl		PT_invalid
+		cmp		tension_line, 499
+		jg		PT_invalid
+		
 		cmp		tension_int, 127 		; adequada quando estiver entre 117 e 137, inclusive estes valores
 		jne		PT_220
 		cmp 	tension_line, 117
-		jl		PT_invalid
+		jl		PT_inadequate
 		cmp		tension_line, 137
-		jg		PT_invalid
+		jg		PT_inadequate
 		jmp		PT_end
 	
 	PT_220:	
 		cmp 	tension_line, 210		; adequada quando estiver entre 210 e 230, inclusive estes valores
-		jl		PT_invalid
+		jl		PT_inadequate
 		cmp		tension_line, 230
-		jg		PT_invalid
+		jg		PT_inadequate
 		jmp		PT_end
 		
 	PT_invalid:
+		dec 	tension_counter
 		mov		ax, 1
 		jmp		PT_end
 		
 	PT_noT:
 		mov		ax, 2
+		jmp		PT_end
+		
+	PT_inadequate:	
+		mov		ax, 3
 		
 	PT_end:
 		ret
@@ -223,6 +252,9 @@ ShowParameters		proc	near
 		lea		bx, tension_str
 		call	WriteString
 		call 	BreakLine
+		
+		mov		ax, line_count
+		call	WriteWord
 		
 		ret
 ShowParameters		endp
@@ -415,6 +447,7 @@ GetNextChar	endp
 ;		  até encontrar um espaço, ignorando espaços iniciais.
 ; Entrada: bx: string origem
 ;		   bp: string destino
+;		   cx: indica se string copiada é tensao
 ;--------------------------------------------------------------------
 Strcpy		proc 	near
 	CP_repeat:					; ignora tabs e espacos
@@ -430,16 +463,21 @@ Strcpy		proc 	near
 		jmp 	CP_repeat       ; Repeat until non-space character is found
 
 	CP_1:
-		mov		al, [bx] 		; copia ate encontra espaco, final da string, CR ou LF
-		cmp		al, 0
-		jz		CP_end
-		cmp		al, SPACE
-		jz		CP_end
+		mov		al, [bx]
+		cmp		al, 0			; copia ate encontra espaco, final da string, CR ou LF
+		jz		CP_end	
 		cmp		al, CR
 		jz		CP_end
 		cmp		al, LF
-		jz		CP_end
+		jz		CP_end 		
+		cmp		cx, 1			; se for tensao, copia ate encontrar virgula
+		jne		CP_continue
 		cmp		al, COMMA
+		jz		CP_end
+		jmp		CP_2
+		
+	CP_continue:	
+		cmp		al, SPACE
 		jz		CP_end
 
 	CP_2:		
@@ -464,12 +502,18 @@ Strcpy		endp
 ; -> devolve o numero 2024 em ax	
 ;--------------------------------------------------------------------
 atoi	proc 	near
+		;call	WriteString
 		mov		ax, 0
+		mov		atoi_error, 0
 		
 	atoi_2:
 		; while (*S!='\0') {
 		cmp		byte ptr[bx], 0
 		jz		atoi_1
+		cmp		byte ptr[bx], SPACE
+		jz		atoi_error_j
+		cmp		byte ptr[bx], TAB
+		jz		atoi_error_j
 
 		; 	A = 10 * A
 		mov		cx, 10
@@ -482,6 +526,9 @@ atoi	proc 	near
 		sub		ax, '0'
 		inc		bx
 		jmp		atoi_2
+		
+	atoi_error_j:
+		mov		atoi_error, 1
 
 	atoi_1:
 		ret
@@ -735,7 +782,6 @@ GetLine		proc	near
 		mov		ax, 0
 	
 	error_return:
-		inc		bp
 		mov		[bp], 0
 		
 		ret
@@ -769,6 +815,7 @@ setChar	endp
 ;--------------------------------------------------------------------
 OpenFiles	proc	near
 		mov		ax, 0						; seta retorno como 0
+		
 		lea		dx, file_in					; abre arquivo de entrada
 		call	fopen
 		jc		file_not_found				; se cf = 1, file_not_found
@@ -784,6 +831,7 @@ OpenFiles	proc	near
 		lea		bx, I_ERROR_2
 		call 	WriteString
 		mov		ax, 1
+		jmp		files_ok
 
 	create_out_file:
 		lea		dx, file_out
