@@ -6,19 +6,19 @@
 		; constantes e strings
 		CR				equ		13					; Carriage Return (Enter)
 		LF				equ		10  				; Line Feed ('\n')
-		TAB			equ		9
-		SPACE			equ		' '
+		TAB				equ		9
+		SPACE			equ		' '					; caracteres uteis no programa
 		HYPHEN			equ		'-'
 		COMMA			equ		','
 		FLAG_I			DB 		'i'
 		FLAG_O			DB 		'o'
 		FLAG_V			DB 		'v'
 		
-		I_INFO			DB 		'-i: ', 0
+		I_INFO			DB 		'-i: ', 0			; string usadas na funcao ShowParameters
 		O_INFO			DB 		'-o: ', 0
 		V_INFO			DB 		'-v: ', 0
 		
-		DEFAULT_IN		DB		'a.in', 0
+		DEFAULT_IN		DB		'a.in', 0			; valores padrao para as variaveis de entrada
 		DEFAULT_OUT		DB		'a.out', 0
 		DEFAULT_TENSION	DB 		'127', 0
 		
@@ -33,9 +33,9 @@
 		; buffers
 		CMDLINE			DB 		240 DUP (?) 	; usado na funcao GetCMDLine
 		BufferWRWORD	DB  	80 	DUP (?)		; usado na funcao WriteWord
-		FileBuffer		DB		240 DUP (?)		; usado em funcoes de arquivos
-		LineBuffer		DB		480 DUP (?)		; usado em funcao de leitura de linha
-		TensionBuffer	DB		8	DUP (?)		; usado para validar tensoes
+		FileBuffer		DB		240 DUP (?)		; usado em funcoes de arquivos 
+		LineBuffer		DB		480 DUP (?)		; usado em funcao de leitura de linha (GetLine)
+		TensionBuffer	DB		8	DUP (?)		; usado para validar tensoes (ProcessTension)
 	
 		; variables
 		cmdline_size	DW		0
@@ -44,13 +44,16 @@
 		file_out		DB		80 	DUP (?)		; string: arquivo de saida
 		file_out_handle	DW		0
 		tension_str		DB  	80	DUP (?) 	; string: valor de tensao
-		tension_int		DB 		0				; int: tensao convertida
+		tension_int		DB 		0				; int: tensao convertida para inteiro
 		tension_line	DW		0				; int: valor de tensao lida do arquivo
 		flag_error		DB 		0				; int: indica se há erro nas flags
 		tension_error	DB		0				; int: indica se tensão é válida
 		atoi_error		DB		0				; int: indica se conversao foi bem sucedida
 		line_count		DW		0				; int: contador de linhas
 		tension_counter	DW		0				; int: contador de tensoes validas (para validacao de linha)
+		sw_m			DW		0
+		sw_n			DW		0
+		sw_f			DW		0				; variaveis usadas em sprintf_w
 		time_adq_tension	DB		0
 		time_no_tension		DB		0
 		
@@ -163,7 +166,11 @@ ProcessLine		proc	near
 		push	bx
 		lea		bx, INV_LINE_1
 		call	WriteString
-		; TODO - escrever numero da linha
+		mov		ax, line_count			; TODO - escrever numero da linha
+		lea		bx, BufferWRWORD
+		call	sprintf_w
+		lea		bx, BufferWRWORD
+		call	WriteString
 		lea		bx, INV_LINE_2
 		call	WriteString
 		lea		bx, LineBuffer
@@ -235,26 +242,26 @@ ProcessTension	endp
 ;	settados pelo programa.
 ;--------------------------------------------------------------------
 ShowParameters		proc	near
-		lea		bx, I_INFO
+		lea		bx, I_INFO				; exibe informacoes da flag i
 		call	WriteString
-		lea		bx, file_in					; exibe informacoes coletadas na tela (debugging)
+		lea		bx, file_in
 		call	WriteString
 		call 	BreakLine
 		
-		lea		bx, O_INFO
+		lea		bx, O_INFO				; exibe informacoes da flag o
 		call	WriteString
 		lea		bx, file_out
 		call    WriteString
 		call	BreakLine
 		
-		lea		bx, V_INFO
+		lea		bx, V_INFO				; exibe informacoes da flag v
 		call	WriteString
 		lea		bx, tension_str
 		call	WriteString
 		call 	BreakLine
 		
-		mov		ax, line_count
-		call	WriteWord
+		; mov		ax, line_count		; exibe numero de linhas lidas
+		; call	WriteWord
 		
 		ret
 ShowParameters		endp
@@ -652,6 +659,58 @@ HexToDecAscii	proc near
 		ret
 
 HexToDecAscii	endp
+
+;--------------------------------------------------------------------
+; sprintf_w: dado um numero e uma string, transforma o numero em ascii 
+; 	e salva na string
+; Entrada:
+; 	ax: inteiro
+; 	bx: string
+; Saida:
+; 	bx: contem a string resultante
+;--------------------------------------------------------------------
+sprintf_w	proc	near
+		mov		sw_n,ax
+		mov		cx,5
+		mov		sw_m,10000
+		mov		sw_f,0
+
+	sw_do:
+		mov		dx,0
+		mov		ax,sw_n
+		div		sw_m
+		cmp		al,0
+		jne		sw_store
+		cmp		sw_f,0
+		je		sw_continue
+	sw_store:
+		add		al,'0'
+		mov		[bx],al
+		inc		bx
+		
+		mov		sw_f,1
+	sw_continue:
+		mov		sw_n,dx
+		mov		dx,0
+		mov		ax,sw_m
+		mov		bp,10
+		div		bp
+		mov		sw_m,ax
+		dec		cx
+		cmp		cx,0
+		jnz		sw_do
+
+		cmp		sw_f,0
+		jnz		sw_continua2
+		mov		[bx],'0'
+		inc		bx
+
+	sw_continua2:
+		mov		byte ptr[bx],0
+		ret	
+sprintf_w	endp
+
+;--------------------------------------------------------------------
 
 BreakLine	proc	near
 	mov		dl, LF
