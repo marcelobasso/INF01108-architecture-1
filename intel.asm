@@ -183,7 +183,7 @@ ProcessLine		proc	near
 		push	bx
 		lea		bx, INV_LINE_1
 		call	WriteString
-		mov		ax, line_count			; TODO - escrever numero da linha
+		mov		ax, line_count
 		lea		bx, BufferWRWORD
 		call	sprintf_w
 		lea		bx, BufferWRWORD
@@ -192,6 +192,7 @@ ProcessLine		proc	near
 		call	WriteString
 		lea		bx, LineBuffer
 		call	WriteString
+		call	BreakLine
 		mov		ax, 1
 		mov		invalid_reading, 1
 		pop		bx
