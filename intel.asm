@@ -907,8 +907,12 @@ GetLine		proc	near
 		mov		dh, 0
 		
 	ignore_loop:
+		push	bx
 		call	getChar
+		pop		bx
 		jc		end_file
+		cmp		ax, 0
+		jz		end_file
 		cmp		dl, LF
 		jz		ignore_loop
 		cmp		dl, CR
@@ -916,15 +920,19 @@ GetLine		proc	near
 		jmp		ignore_getChar
 		
 	read_loop:
+		push	bx
 		call	getChar
+		pop		bx
 		jc		end_file
+		cmp		ax, 0
+		jz		end_file
 	ignore_getChar:
 		cmp		dl, LF
 		jz		end_line
 		cmp		dl, CR
 		jz		end_line
 		cmp		dl, 0
-		jz		end_line
+		jz		end_file
 		
 		cmp		dl, 'f'				; caso entrar o caractere 'f' de 'fim' ou 'F', pula para end_file
 		jz		end_file
