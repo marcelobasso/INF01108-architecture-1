@@ -1,0 +1,107 @@
+;; Cifra de Cesar
+;; Marcelo Basso, 00579239
+
+;; -----------------
+;;   Inicializacao
+;; -----------------
+
+;; inicia as variaveis com valor 0
+ORG hC0
+SRC:	db 0
+DST:	db 0
+PASSO:	db 0
+OP:	db 0
+
+;; -----------------
+;;      Programa
+;; -----------------
+
+ORG h0
+
+;; define variaveis auxiliares
+MAX:	db h5A ;;90
+MIN:	db h41 ;;65
+AJUSTE:	db h1A ;;26
+LOOP_E: db 0
+AUX:	db 0
+
+		;; carrega a opcao desejada (cifrar/decifrar)
+		LDR B	OP
+		;; se 0: cifra
+		JZ	jmp_cifra
+		;; senao: decifra
+		JMP	decifra
+jmp_cifra:	
+		JMP cifra
+fim:	HLT
+
+
+;; -----------------
+;; 	Funcoes
+;; -----------------
+
+;; -------
+;; cifra
+;; -------
+cifra:
+LDR A   loop_c
+STR A   LOOP_E ;guarda o endereco do loop de cifragem
+loop_c: 
+LDR A	SRC, I	;carrega a letra
+JZ	    fim_string
+ADD A 	PASSO 	;realiza a cifragem
+STR A	DST, I 	;coloca o valor na posicao correta
+LDR B 	DST, I
+SUB B	MAX     ;verifica se esta dentro do intervalo (65-90)
+JN	    incrementa_apontadores
+JZ	    incrementa_apontadores
+JMP     ajusta  ;se nao estiver, ajusta a letra (-26)
+
+;; -------
+;; decifra
+;; -------
+decifra:
+LDR A   loop_d
+STR A   LOOP_E ;guarda o endereco do loop de decifragem
+loop_d: 
+LDR A	SRC, I	;carrega a letra
+JZ	fim_string
+SUB A 	PASSO 	;realiza a decifragem
+STR A	DST, I 	;coloca o valor na posicao correta
+LDR B	DST, I
+SUB B	MIN	
+JN	    ajusta  ;checa se esta dentro do intervalo (65-90)
+JMP 	incrementa_apontadores ;se não estiver, ajusta (+26)
+
+;; -------------------
+;; funcoes auxiliares
+;; -------------------
+
+;; ---------
+ajusta:
+LDR B   OP
+JZ      ajusta_cifragem
+ADD A	AJUSTE	;ajusta a decifragem
+JMP     guarda_ajuste
+
+ajusta_cifragem:
+SUB A	AJUSTE	;ajusta a letra
+
+guarda_ajuste:
+STR A	DST, I	;guarda a informacao ajustada
+JMP     incrementa_apontadores
+
+;; ---------
+incrementa_apontadores:
+LDR B	DST
+ADD B	#1
+STR B	DST 
+LDR B	SRC
+ADD B	#1
+STR B	SRC 
+JMP LOOP_E
+
+;; ---------
+fim_string:
+STR A	DST, I
+JMP fim

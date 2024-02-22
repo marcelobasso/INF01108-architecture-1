@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@200&display=swap" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Sans:wght@200&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css" integrity="sha512-z3gLpd7yknf1YoNbCzqRKc4qyor8gaKU1qmn+CShxbuBusANI9QpRohGBreCFkKxLhei6S9CQXFEbbKuqLg0DA==" crossorigin="anonymous" referrerpolicy="no-referrer" />    <title>Ramses Test Generator</title>
+    <style>
+        div.main {
+            width: 100%;
+            margin: 0;
+        }
+
+        * {
+            font-family: 'Montserrat', sans-serif;
+        }
+
+        h1 {
+            margin: 0 auto;
+            font-size: 4rem;
+        }
+
+        div#content {
+            max-width: 1200px;
+            display: block;
+            margin: 32px auto;
+            padding: 32px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        textarea {
+            font-family: 'Fira Sans', sans-serif;
+            width: 100%;
+            margin: 32px;
+            min-height: 60vh;
+            border-radius: 24px;
+            border: 1px black solid;
+            padding: 24px;
+            font-size: 1rem;
+            resize: none;
+        }
+
+        ::-webkit-scrollbar {
+            width: 16px;
+            height: 16px;
+        }
+        ::-webkit-scrollbar-button:start:decrement,
+        ::-webkit-scrollbar-button:end:increment  {
+            height: 16px;
+            background-color: transparent;
+        }
+        ::-webkit-scrollbar-track-piece  {
+            background-color: #eeeeee;
+            -webkit-border-radius: 16px;
+        }
+        ::-webkit-scrollbar-thumb:vertical {
+            height: 24px;
+            background-color: #666;
+            border: 1px solid #eee;
+            -webkit-border-radius: 16px;
+        }
+        p {
+            margin-bottom: 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="main">
+        <div id="content">
+        <h1>Ramses Test Generator</h1>
+        <p>A simple .rac content generator for testing a Caesar cipher algorithm on a Ramses computer.</p>
+        <span>To generate new tests, refresh the page</span>
+        <textarea name="file-content" id="file-content"></textarea>
+        </div>
+    </div>
+</body>
+</html>
+<script src="./test-generator.js"></script>

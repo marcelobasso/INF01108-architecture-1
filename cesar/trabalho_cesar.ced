@@ -1,0 +1,631 @@
+;; ####################################
+;;
+;; JOGO DA FORCA - trabalho Cesar
+;;
+;; Marcelo Basso - 579239
+;; 12/2023
+;;
+;; ####################################
+
+;==========================================================================
+; Area Reservada
+
+; Acesso em 16 bits
+		ORG		hff80
+STACK:	daw		[31]		; Area reservada
+IVET:	dw		0			; Vetor de interrupcao
+
+; Acesso em 8 bits
+		dab		[23]
+TIMDT:	db		0		; Base de tempo do timer
+INTS:	db		0		; INTERRUPT STATUS: IP x x x . x x IPStec IPStim
+INTE:	db		0		; INTERRUPT ENABLE: IE x x x . x x IEStec IEStim
+TECST:	db		0		; Status do teclado
+TECDT:	db		0		; Dado do teclado
+VISOR:	dab		[36]	; Portas de acesso ao visor
+		
+		ORG h8000
+Vidas:		dw 0			; 10 vidas
+Palavra:	dab	[25], 0	;	 palavra tam max 25 chars e \0 no final
+Letra:		db 0
+; variaveis usadas pelas funcoes converte_ascii, mais significativo, menos significativo
+Entrada_conversao:	dw 0
+Saida_conversao:	dw 0
+Word_split:			dw 0
+Mins:				dw 0
+Secs:				dw 0
+; vars auxiliares usadas na funcao que printa strings no visor começando a partir de x posicao
+Inicio_str:		dw 0		
+Inicio_visor:	dw 0
+Pos_vidas:		EQU	hFFF7
+Pos_tempo:		EQU hFFEC
+Time_count:		dw 0
+Acertos:		dw 0
+Flag_acertou:	dw 0
+; Variaveis auxiliares para validacoes (letra, numero, vidas)
+L_valida:	db 0		; Letra válida (usada para validar input de palavra do usuario)
+N_valido:	db 0    	; Numero valido (usado para valida input de vidas do usuario)
+V_valida:	db 0		; Numero de vidas valido
+; Strings (o espaco antes da string é pra simplificar a escrita da string na tela)
+STR_VIDAS:				dab 	' Vidas: ', 0
+STR_VITORIA:			dab 	' Voce ganhou!', 0
+STR_DERROTA:			dab		' Voce perdeu.', 0
+STR_JOGAR_NOVAMENTE:	dab		' Jogar novamente? [s/n]: ', 0
+STR_INICIO:				dab 	' Digite a palavra [enter]', 0
+STR_TEMPO_JOGO:			dab		' Tempo de jogo: ', 0 
+STR_TCHAU:				dab		' good bye...', 0
+
+; registradores com valores fixos:
+; r3 - usado para guardar o tamanho da palavra
+; r6 - STACK
+; r7 - PC
+
+;----------------------------------------------------------
+; Programa Principal
+	ORG	0
+	
+inicio_jogo:
+	mov		#STACK, r6
+	jsr		r7, inicia_variaveis		; inicia as variaveis do jogo
+	mov		#STR_INICIO, Inicio_str		
+	mov		#VISOR, Inicio_visor		
+	jsr		r7, imprime_string			; imprime string "Digite a palavra [...]"
+	
+	loop_espera_enter:					; aguarda o usuario teclar enter
+		tst 	Letra
+		bmi		loop_espera_enter
+		cmp		#h0D, Letra
+		bne		loop_espera_enter
+		jsr 	r7, inicia_variaveis	
+	
+loop_le_palavra:						; recebe a palavra a ser adivinhada no jogo
+	tst 	Letra
+	bmi 	loop_le_palavra				; verifica se alguma tecla foi digitada
+	
+	cmp		Letra, #h0D			; checa se a tecla digitada é um enter
+	beq		loop_le_vidas
+	
+	cmp		Letra, #8			; checa se a tecla digitada é um backspace
+	bne		continua_leitura
+	tst		r3
+	beq		reseta_letra		; testa se o usuário ainda pode apagar letras
+	dec		r2
+	mov		#' ', (r2)			; se sim, apaga letra do visor
+	dec		r3					; diminui o contador de tam da palavra
+	dec		r4					; diminui o ponteiro do vetor palavra na memória
+	and		#hFF00, (r4)		; apaga a letra digitada do vetor palavra
+	br		reseta_letra
+		
+	continua_leitura:			; se o usuário nao digitou nem enter nem backspace
+	cmp 	r3, #25	
+	bge		reseta_letra 		; caso ja tiver chego no limite de tamanho da palavra
+	jsr		r7, valida_letra	; verifica se a tecla digitada é um caractere válido
+	cmp		L_valida, #1		; checa se letra é valida
+	bne		reseta_letra
+	jsr		r7, to_upper		; toUpper(Letra)
+	or		Letra, (r4)			; guarda letra (caixa-alta) no vetor Palavra
+	mov 	Letra, (r2)			; exibe letra na tela
+	inc		r4					; posicao da letra no vetor Palavra
+	inc		r2					; posicao da letra no visor
+	inc 	r3					; numero de letras na palavra
+	
+	reseta_letra:
+		mov 	#-1, Letra
+		br 		loop_le_palavra
+	
+loop_le_vidas:					; recebe a quantidade de vidas do jogador
+	clr 	Vidas
+	mov 	#-1, Letra
+	jsr 	r7, limpa_visor		
+	mov		#STR_VIDAS, Inicio_str
+	mov		#VISOR, Inicio_visor
+	jsr		r7, imprime_string	; imprime string "Vidas: "
+	mov		#VISOR, r2
+	add		#7, r2				; offset string vidas
+	clr 	r1	
+	
+	loop_vidas:					; aguarda o jogador apertar uma tecla
+		tst		Letra
+		bmi		loop_vidas			; verifica se alguma letra foi teclada
+		
+		cmp		#h0D, Letra
+		beq		valida_vidas		; se for um enter, inicia o jogo (caso o usuario nao tiver digitado nada, ocorrerá erro na validacao)
+		
+		cmp		#8, Letra			; checa se é backspace
+		bne		testa_limite
+		jsr		r7, apaga_caractere	; checa se pode apagar, e apaga caractere da tela
+		br		loop_vidas
+			
+		testa_limite:				; verifica se ainda pode digitar digitos ou se ja bateu o limite (2 digitos)
+			cmp		#2, r1
+			beq		loop_vidas
+			mov		Letra, (r2)
+			inc		r2
+			inc		r1
+			mov		#-1, Letra
+			br		loop_vidas
+
+		; checa se sao digitos numericos e os converte para decimal
+		valida_vidas:
+			jsr		r7, valida_n_vidas
+			tst		V_valida
+			beq		loop_le_vidas
+			tst		Vidas
+			beq		loop_le_vidas
+
+inicia_jogo:
+		mov 	#-1, Letra
+		jsr 	r7, limpa_visor
+		jsr 	r7, imprime_jogo	; imprime jogo com palavras escondidas
+		clr		Time_count			; limpa o contador
+		clr		Mins
+		clr		Secs	
+	
+loop_jogo:
+	tst 	Letra
+	bmi		loop_jogo				; checa se alguma letra foi digitada
+	jsr 	r7, imprime_jogo
+	cmp		Acertos, r3				; checa se os acertos sao iguais ao tamanho da palavra
+	beq		fim_jogo				; se fim, acaba o jogo
+	cmp		#1, Flag_acertou		
+	beq		continua_jogo			; caso o usuario acertou, continua jogo
+	sub		#1, Vidas				; senão, subtrai uma vida
+	jsr		r7, imprime_vidas
+	tst		Vidas					
+	beq		fim_jogo				; caso as vidas acabarem, acaba o jogo
+
+	continua_jogo:
+		mov 	#-1, Letra
+		br 		loop_jogo
+		
+fim_jogo:
+	mov 	#h82, INTE				; desativa interrupcoes de tempo
+	jsr		r7, limpa_visor			
+	mov		#VISOR, r4
+	mov		#STR_VITORIA, Inicio_str
+	tst		Vidas					; checa se o usuário ainda tem vidas
+	bne		imprime_mensagem_fim	; se tiver, significa que ganhou 
+	mov		#STR_DERROTA, Inicio_str	; caso contrário, muda mensagem para "Voce perdeu."
+	mov		#VISOR, Inicio_visor		
+	
+	imprime_mensagem_fim:
+		mov		#VISOR, Inicio_visor
+		jsr		r7, imprime_string	; imprime a mensagem correta no visor
+	
+	fim_mensagem:
+		jsr		r7, imprime_tempo_jogo		; imprime o tempo de jogo na tela
+		mov		#-1, Letra
+		
+reiniciar_loop:						; pede ao usuário se o mesmo deseja jogar novamente
+	tst 	Letra
+	bmi		reiniciar_loop	
+	cmp		#h0D, Letra				; caso o usuario apertar enter, exibe a mensagem de jogar novamente
+	beq		imprime_jogar_novamente
+	mov		#-1, Letra
+	br		reiniciar_loop
+	
+	imprime_jogar_novamente:		; exibe mensagem "Jogar novamente?"
+		jsr		r7, limpa_visor
+		mov		#STR_JOGAR_NOVAMENTE, Inicio_str
+		mov		#VISOR, Inicio_visor
+		jsr		r7, imprime_string
+		
+	loop_reiniciar_jogo:			; aguarda o usuario digitar a opcao desejada
+		tst		Letra
+		bmi		loop_reiniciar_jogo
+		jsr		r7, to_upper
+		cmp		#'S', Letra			; se for "s" ou "S" (to_upper converte para maiusculo) entao reinicia
+		bne		teste_n
+		clr		r7
+		
+		teste_n:
+		cmp		#'N' Letra			; se for "n" ou "N" finaliza o jogo
+		beq		fim_execucao
+		mov		#-1, Letra
+		br		loop_reiniciar_jogo
+		
+	fim_execucao:					; limpa o visor e escreve mensagem de despedida :)
+		jsr		r7, limpa_visor
+		mov		#STR_TCHAU, Inicio_str
+		mov		#VISOR, Inicio_visor
+		jsr		r7, imprime_string
+		hlt
+	
+;----------------------------------------------------------
+; inicia variaveis usadas no programa
+inicia_variaveis:
+	mov		#isr, IVET	; define subrotina para tratar interrupcoes
+	mov 	#h83, INTE
+	mov 	#10, Vidas
+	mov 	#250, TIMDT
+	mov 	#Palavra, r4
+	sub		#1, r4		; offset de acesso ao vetor palavra para contornar problemas com Word
+	mov 	#-1, Letra
+	mov 	#VISOR, r2
+	clr		TECST		; reseta estado do teclado
+	clr 	TIMDT
+	clr 	INTS		; reseta interrupcoes
+	clr 	Mins
+	clr 	Secs
+	clr 	Time_count
+	clr 	L_valida
+	clr 	r3
+	clr 	Acertos
+	clr		Flag_acertou
+	jsr 	r7, limpa_visor
+	jsr		r7, limpa_palavra
+	
+	rts 	r7
+
+;----------------------------------------------------------
+; definicao isr e tratamento de interrupcoes
+isr:
+	mov		r0,-(r6)	; Salva registradores
+	mov		r1,-(r6)
+	mov		r2,-(r6)	
+	mov		r3,-(r6)	
+	mov		r4,-(r6)
+	mov		r5,-(r6)
+	
+	testaTec:
+		mov		INTS, r0		; Verifica se eh INT do TECLADO
+		and		#2, r0			
+		beq		testaTimer	
+		jsr		r7, ISRtec		; Tratamento da INT do TECLADO
+
+	testaTimer:
+		mov		INTS, r0		; Verifica se eh INT do TIMER
+		and		#1, r0
+		beq		fimISR
+		jsr		r7, ISRtimer	; Tratamento da INT do TIMER
+
+	fimISR:
+		mov		(r6)+,r5		; Retorna os registradores da pilha
+		mov		(r6)+,r4
+		mov		(r6)+,r3
+		mov		(r6)+,r2
+		mov		(r6)+,r1
+		mov		(r6)+,r0
+
+		rti					; Return From Interrupt
+
+;..........................................................
+ISRtec:
+	mov		TECDT, Letra
+	clr		TECST
+	and		#hFFFD, INTS	; resolve interrupcao de teclado
+	rts 	r7
+
+;..........................................................	
+ISRtimer:
+	inc 	Time_count
+	cmp		#4, Time_count	; verifica se passou 1s
+	bne		fim_isr_timer	
+	clr		Time_count		; Time_count = 0
+	inc		Secs			; Secs++
+	
+	cmp		#60, Secs		; verifica se passou 1m
+	bne		fim_isr_timer
+	clr		Secs			; Secs = 0
+	inc		Mins			; Mins++
+	
+	fim_isr_timer:
+		and		#hFFFE, INTS	; resolve interrupcao de timer
+		rts 	r7
+
+;----------------------------------------------------------
+; -----------------Funcoes Auxiliares----------------------
+;----------------------------------------------------------
+; Funcao responsavel por exibir o jogo no visor
+imprime_jogo:					
+	mov 	r3, r5
+	mov		#Palavra, r4
+	sub 	#1, r4
+	mov 	#VISOR, r2
+	jsr		r7, to_upper
+	clr		Flag_acertou
+	
+	loop_print:
+		mov 	(r4), r1
+		and		#255, r1
+		
+		cmp 	#' ', (r2)			; se a posicao do visor esta vazia, preenche com hidden
+		beq		print_hidden
+		
+		cmp 	#'_', (r2)		
+		bne		inc_printers		; se possui um hidden, verifica palavra
+		
+		cmp 	Letra, r1
+		bne		print_hidden		; se nao for a letra correta, print hidden
+		
+		jsr		r7, to_upper
+		mov 	Letra, (r2)			; se for, coloca a letra no visor
+		inc		Acertos				; incrementa o numero de acertos
+		mov 	#1, Flag_acertou
+		br		inc_printers
+		
+		print_hidden:
+			cmp 	#'-', r1		; checa se letra é um hífen
+			bne		hidden_letter
+			mov		#'-', (r2)		; se for, printa o hífen à mostra
+			inc 	Acertos			; conta hífens como caracteres "acertados"
+			br 		inc_printers
+			
+		hidden_letter:
+			mov		#'_', (r2)
+			
+		inc_printers:
+			inc 	r2
+			inc		r4
+			
+		sob		r5, loop_print
+	
+	jsr		r7, imprime_vidas
+	
+	fim_print:
+		rts		r7
+
+; .........................................................
+; funcao que imprime as vidas na tela
+imprime_vidas:
+	mov		#Pos_vidas, Inicio_visor	; marca a posicao no visor
+	mov		#STR_VIDAS, Inicio_str		; indica a letra da string a ser impressa
+	jsr		r7, imprime_string			; imprime a string "Vidas: "
+		
+	; converte para digitos ascii
+	conversao_vidas:
+		mov		Vidas, Entrada_conversao
+		jsr		r7, converte_para_ascii		; converte as vidas para caracteres
+		
+	mov		#Pos_vidas, r4
+	add 	#7, r4							; offset de impressao no visor
+		
+	mov		#Saida_conversao, Entrada_conversao
+	jsr		r7, mais_significativo
+	mov		Word_split, (r4)				; imprime parte mais significativa
+		
+	inc 	r4
+	jsr		r7, menos_significativo			; imprime parte menos significativa
+	mov		Word_split, (r4)
+	
+	rts		r7
+
+; .........................................................
+; funcao responsavel por converter o tempo para ascii
+; e exibi-lo no visor
+imprime_tempo_jogo:
+	mov		#STR_TEMPO_JOGO, Inicio_str
+	mov		#Pos_tempo, Inicio_visor
+	jsr		r7, imprime_string
+		
+	; imprime minutos ----------------
+	conversao_tempo:
+		mov		Mins, Entrada_conversao
+		jsr		r7, converte_para_ascii
+		
+	mov		#Pos_tempo, r2
+	add		#15 , r2
+	mov		#Saida_conversao, Entrada_conversao
+	jsr		r7, mais_significativo
+	mov		Word_split, (r2)
+	inc		r2
+	jsr		r7, menos_significativo
+	mov		Word_split, (r2)	
+	inc 	r2
+	mov		#':', (r2)
+	inc 	r2
+	
+	; imprime segundos ----------------
+	mov		Secs, Entrada_conversao
+	jsr		r7, converte_para_ascii
+		
+	mov		#Saida_conversao, Entrada_conversao
+	jsr		r7, mais_significativo
+	mov		Word_split, (r2)
+	inc		r2
+	jsr		r7, menos_significativo
+	mov		Word_split, (r2)
+
+	rts 	r7
+
+; .........................................................
+; dado o endereco de inicio da uma string, imprime-a no visor
+imprime_string:
+	mov		Inicio_str, r1
+	mov		Inicio_visor, r2
+	
+	loop_imprime_string:
+		mov		(r1), r4
+		and		#255, r4
+		tst		r4
+		beq		fim_string
+		mov		r4, (r2)
+		inc		r1
+		inc		r2
+		br		loop_imprime_string
+	
+	fim_string:
+		rts		r7
+
+; .........................................................
+; dado o endereço de um valor, retorna seu byte mais/menos significativo
+mais_significativo:
+	mov		Entrada_conversao, r0
+	sub		#1, r0
+	mov		(r0), r1
+	and		#h00FF, r1
+	mov		r1, Word_split
+	
+	rts		r7
+
+menos_significativo:
+	mov		Entrada_conversao, r0
+	mov		(r0), r1
+	and		#h00FF, r1
+	mov		r1, Word_split
+
+	rts		r7
+
+; .........................................................
+; funcao para converter um numero de dois dígitos para ascii
+; a saida é uma word onde o byte mais significativo é o digito mais significativo
+; e o outro byte é o dígito menos significativo (em decimal)
+converte_para_ascii:
+	clr 	Saida_conversao
+	mov		Entrada_conversao, r5
+
+	loop_conversao_ascii:
+		cmp		#10, r5						; se for menor q 10, termina conversão
+		bgt		fim_conversao
+		sub		#10, r5						; senao, subtrai 10
+		add		#h0100, Saida_conversao
+		br		loop_conversao_ascii
+		
+	fim_conversao:
+		add		r5, Saida_conversao
+		add		#h3000, Saida_conversao		; converte digito mais significativo para digito ascii
+		add		#h0030, Saida_conversao		; converte digito menos significativo para digito ascii
+		rts		r7
+
+; .........................................................
+; Funcao responsavel por validar a letra digitada
+; Caso a tecla nao for uma letra valida, apenas ignora
+valida_letra:
+	mov #1, L_valida
+
+	; if (Letra == 45) return 1
+	cmp Letra, #45
+	beq fim_validacao_letra
+
+	; if (Letra > 122) return 0
+	cmp	Letra, #122
+	bgt	letra_inv		
+
+	; if (Letra < 65) return 0
+	cmp	Letra, #65
+	blt	letra_inv	
+
+	; if (Letra <= 90) return 1
+	cmp	Letra, #90
+	ble	fim_validacao_letra
+
+	; if (Letra >= 97) return 1
+	cmp Letra, #97
+	bge	fim_validacao_letra
+
+	letra_inv:
+		mov #0, L_valida	
+	fim_validacao_letra: 
+		rts r7
+
+; .........................................................
+; Apaga um caractere no visor
+apaga_caractere:
+	tst		r1
+	beq		fim_apaga
+	dec		r2					; apaga ultimo digito
+	mov		#' ', (r2)
+	dec		r1
+	mov		#-1, Letra
+	
+	fim_apaga:
+		rts 	r7
+
+; .........................................................
+; Verifica se um digito numérico é valido, isso é:
+; se ele é um dígito numérico e não qualquer outro caractere
+valida_numero:
+	mov		#1, N_valido
+	cmp		r1, #48
+	blt		num_invalido
+	cmp		r1, #57
+	bgt		num_invalido
+	br		fim_validacao_numero
+	
+	num_invalido:
+		clr		N_valido		; n invalido
+	
+	fim_validacao_numero:
+		rts		r7
+		
+; .........................................................
+; Valida a quantidade de vidas digitada pelo usuario
+valida_n_vidas:
+	mov		#1, V_valida
+	
+	dec		r2
+	mov		(r2), r1
+	and		#255, r1
+	jsr		r7, valida_numero	; se o segundo caractere digitado é um numero
+	tst		N_valido
+	beq		v_invalida
+	
+	sub		#48, r1				; converte para numeral
+	add		r1, Vidas			; soma às vidas
+	dec		r2
+	mov		(r2), r1
+	and		#255, r1
+	jsr		r7, valida_numero	; se o primeiro caractere digitado é um numero
+	tst		N_valido
+	beq		v_invalida
+	sub		#48, r1				; converte para numeral
+
+	loop_soma_vidas:			; soma o numeral * 10 às vidas
+		add		#10, Vidas
+		sob		r1, loop_soma_vidas
+	
+	br		fim_validacao_vidas
+	
+	v_invalida:
+		clr		V_valida		; V_valida = 0
+		br 		fim_validacao_vidas
+
+	fim_validacao_vidas:
+		rts		r7
+; .........................................................
+; Converte o conteúdo da variável Letra para caixa alta
+; a letra nesse espaço de memória já deve ser valida.
+to_upper:
+	cmp Letra, #45
+	beq return_toUpper
+	
+	cmp Letra, #90
+	ble return_toUpper
+	
+	sub #32, Letra			; converte para maiusculo
+	
+	return_toUpper:
+		rts r7
+
+; .........................................................		
+; Funcao responsável por limpar o visor
+limpa_visor:
+	mov		#36, r0		; inicia contador
+	mov		#VISOR, r1	; move a posicao inicial do visor para r1
+	
+	loop_reset:
+		mov		#' ', (r1) 		; limpra primeira posicao do visor
+		inc		r1				; incrementa para proxima pos
+		sob		r0, loop_reset	; subtrai um do contador e repete
+		rts		R7
+		
+; .........................................................
+; Função responsável por limpar o vetor palavra na memória
+limpa_palavra:
+	mov		#25, r0
+	mov		#Palavra, r1
+	
+	loop_limpa_palavra:
+		and		#0, (r1)
+		inc		r1
+		sob		r0, loop_limpa_palavra
+		
+	rts		r7
+
+; .........................................................
+;
+;	 ,_,  
+;	(.,.) 
+;	(   ) 
+;	-"-"--
+;
